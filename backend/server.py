@@ -188,3 +188,8 @@ app.include_router(api)
 @app.get("/")
 async def root():
     return {"service": "Receivables Rescue", "docs": "/docs", "api": "/api/health"}
+
+
+@app.get("/health")
+async def health_probe():
+    return {"status": "ok"}

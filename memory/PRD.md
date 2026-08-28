@@ -82,6 +82,23 @@ dashboards, social features, a UI component library, an animation runtime,
 Gmail/Slack OAuth integrations. The app is deliberately dependency-light because
 its users are on slow mobile connections.
 
+### 2026-08-28 (github sync + redeploy) — Emergent
+- Fetched and fast-forward merged latest `main` (48e81e6) from the connected
+  GitHub repo (`rajnishmanitiwari/Receivables-Rescue`) into the workspace.
+- Installed new deps: `python-multipart`, `pymupdf` (backend);
+  `@fontsource/ibm-plex-sans`, `@fontsource/source-serif-4` (frontend).
+- `test_engine.py`: **13/13 passing**. `GET /api/health` confirms `pdf:true`,
+  `upload:true`. `POST /api/extract` route reachable (422 on empty file, as
+  expected). Journey re-verified via screenshot: example bills -> review table
+  -> "Show me who to chase" -> aging bars + MSMED interest card -> row expand.
+- Added `GET /health` (plain, non-`/api`) in `server.py` returning `{"status":
+  "ok"}` as a K8s liveness-probe safety net — `deployment_agent` flagged the
+  probe hitting `/health` and getting 404 since only `/` and `/api/health`
+  existed.
+- `deployment_agent`: no blockers. Live production still shows 404 on
+  `/health` because that reflects the **previous** deployment, before this
+  fix — resolves once the app is redeployed.
+
 ## Backlog
 - Verify the NVIDIA / Kimi vision endpoint against a real scanned invoice; it
   has not been exercised end to end.
