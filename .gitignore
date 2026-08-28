@@ -8,3 +8,9 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
