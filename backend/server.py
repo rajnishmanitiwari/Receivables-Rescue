@@ -16,11 +16,12 @@ try:
 except Exception:
     pass
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import engine
+import extract
 import llm
 import messages as msg
 
@@ -58,14 +59,26 @@ class AnalyseRequest(BaseModel):
     company_name: str = Field("", max_length=80)
     tone: str = Field("professional and direct", max_length=60)
     language: str = Field("English", max_length=40)
+    # None switches the MSMED statutory-interest calculation off (non-India users).
+    bank_rate: float | None = Field(engine.RBI_BANK_RATE_DEFAULT, ge=0, le=25)
 
 
 @api.get("/health")
 async def health():
+    try:
+        import pymupdf  # noqa: F401
+        pdf_ok = True
+    except Exception:
+        pdf_ok = False
     return {
         "status": "ok",
         "llm": llm.is_enabled(),
+        "vision": extract.vision_enabled(),
+        "pdf": pdf_ok,
+        "upload": globals().get("UPLOAD_ENABLED", False),
+        "max_upload_mb": extract.MAX_BYTES // (1024 * 1024),
         "db": _db is not None,
+        "default_bank_rate": engine.RBI_BANK_RATE_DEFAULT,
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -96,13 +109,14 @@ async def analyse(req: AnalyseRequest):
         logger.exception("parse failure")
         raise HTTPException(status_code=422, detail="Could not read that file. Check the format and try again.") from exc
 
-    report = engine.analyse(invoices, today=date.today())
+    report = engine.analyse(invoices, today=date.today(), bank_rate=req.bank_rate)
     followups = msg.build_messages(
         report["priority"],
         sender=req.sender_name,
         company=req.company_name,
         currency=req.currency,
         limit=10,
+        statutory_rate=report.get("statutory_rate"),
     )
     if llm.is_enabled():
         followups = await llm.polish(followups, req.tone, req.language)
@@ -119,6 +133,54 @@ async def analyse(req: AnalyseRequest):
 
     return {"report": report, "messages": followups, "warnings": warnings, "currency": req.currency}
 
+
+def _register_upload_route() -> bool:
+    """Register the file-upload route defensively.
+
+    FastAPI asserts that python-multipart is installed at ROUTE DEFINITION time,
+    not at request time. If that dependency ever fails to install, an unguarded
+    route would take down the whole backend at import. Here, uploads simply
+    switch off and the paste/CSV path keeps working. /api/health reports which.
+    """
+    try:
+        api.add_api_route("/extract", extract_files, methods=["POST"])
+        return True
+    except Exception:
+        logger.error("File uploads disabled: python-multipart is unavailable.")
+        return False
+
+
+async def extract_files(files: list[UploadFile] = File(...)):
+    """Read invoices out of PDFs, photos or spreadsheets.
+
+    Always returns rows for the user to review and correct — extraction is a
+    starting point, never the final word.
+    """
+    if not files:
+        raise HTTPException(status_code=422, detail="No files were uploaded.")
+    if len(files) > 12:
+        raise HTTPException(status_code=422, detail="Up to 12 files at a time.")
+    rows: list[dict] = []
+    notes: list[str] = []
+    for f in files:
+        try:
+            blob = await f.read()
+        except Exception:
+            notes.append(f"{f.filename}: could not be read.")
+            continue
+        try:
+            out = await extract.extract_file(f.filename or "file", blob)
+        except Exception:
+            logger.exception("extract failure for %s", f.filename)
+            notes.append(f"{f.filename}: could not be read.")
+            continue
+        rows.extend(out.get("rows", []))
+        if out.get("note"):
+            notes.append(out["note"])
+    return {"rows": rows, "notes": notes, "vision": extract.vision_enabled()}
+
+
+UPLOAD_ENABLED = _register_upload_route()
 
 app.include_router(api)
 

@@ -50,6 +50,27 @@ TIERS: list[tuple[str, int, int]] = [
 
 MAX_INVOICES = 2000
 
+# --- India: MSMED Act, 2006 ------------------------------------------------
+# Section 15: a buyer must pay a registered micro/small enterprise within the
+#   agreed period, capped at 45 days from acceptance (15 days if nothing agreed).
+# Section 16: on delay, the buyer owes compound interest with MONTHLY RESTS at
+#   three times the Bank Rate notified by the Reserve Bank of India.
+# Bank Rate is user-editable in the UI because it moves; this default is the
+# rate published as effective 5 August 2026. Verify before relying on a figure.
+RBI_BANK_RATE_DEFAULT = 5.50
+MSMED_MULTIPLIER = 3
+MSMED_MAX_CREDIT_DAYS = 45
+DAYS_PER_MONTH = 30.4375
+
+
+def msmed_interest(amount: float, days_overdue: int, bank_rate: float) -> float:
+    """Section 16 compound interest, monthly rests. Zero until payment is late."""
+    if days_overdue <= 0 or amount <= 0 or bank_rate <= 0:
+        return 0.0
+    monthly = (MSMED_MULTIPLIER * bank_rate / 100.0) / 12.0
+    months = days_overdue / DAYS_PER_MONTH
+    return round(amount * ((1 + monthly) ** months - 1), 2)
+
 
 class ParseError(ValueError):
     pass
@@ -194,6 +215,7 @@ class Invoice:
     probability: float = 0.0
     expected_value: float = 0.0
     slip_30d: float = 0.0
+    statutory_interest: float = 0.0
     rank: int = 0
 
 
@@ -294,7 +316,10 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
 # ---------------------------------------------------------------------------
 # Analysis
 # ---------------------------------------------------------------------------
-def analyse(invoices: list[Invoice], today: date | None = None) -> dict[str, Any]:
+def analyse(invoices: list[Invoice], today: date | None = None,
+            bank_rate: float | None = None) -> dict[str, Any]:
+    """bank_rate is the RBI Bank Rate as a percentage. Pass None to switch the
+    MSMED statutory-interest calculation off entirely (non-India users)."""
     today = today or date.today()
 
     for inv in invoices:
@@ -307,6 +332,9 @@ def analyse(invoices: list[Invoice], today: date | None = None) -> dict[str, Any
         # The number that makes people act: value destroyed by waiting one more month.
         p_later = recovery_probability(inv.days_overdue + 30)
         inv.slip_30d = round(inv.amount * (inv.probability - p_later), 2)
+        inv.statutory_interest = (
+            msmed_interest(inv.amount, inv.days_overdue, bank_rate) if bank_rate else 0.0
+        )
 
     # Overdue always outranks not-yet-due; within that, rank by the money you
     # lose by waiting another 30 days. That deliberately surfaces mid-age
@@ -390,7 +418,10 @@ def analyse(invoices: list[Invoice], today: date | None = None) -> dict[str, Any
         "expected_recoverable": expected,
         "at_risk": round(total - expected, 2),
         "cost_of_waiting_30d": cost_of_waiting,
-        "ranking_basis": "Money lost if this invoice goes unchased for another 30 days.",
+        "statutory_interest_total": round(sum(i.statutory_interest for i in invoices), 2),
+        "bank_rate": bank_rate,
+        "statutory_rate": round(MSMED_MULTIPLIER * bank_rate, 2) if bank_rate else None,
+        "ranking_basis": "Ordered by how much each bill costs you if you wait another 30 days.",
         "weighted_avg_days_overdue": weighted_days,
         "concentration_top_customer": top_share,
         "buckets": buckets,
@@ -414,5 +445,18 @@ def analyse(invoices: list[Invoice], today: date | None = None) -> dict[str, Any
                 "amounts, not a prediction about your specific customers. Your own history will "
                 "differ. Use the ranking, not the decimal places."
             ),
+            "msmed": {
+                "enabled": bool(bank_rate),
+                "bank_rate": bank_rate,
+                "statutory_rate": round(MSMED_MULTIPLIER * bank_rate, 2) if bank_rate else None,
+                "note": (
+                    "Under Section 16 of the MSMED Act, 2006 a buyer who pays a registered micro "
+                    "or small enterprise late owes compound interest at three times the RBI Bank "
+                    "Rate, with monthly rests. Section 15 caps the agreed credit period at 45 days. "
+                    "This is an estimate for your own planning, not legal advice, and it only "
+                    "applies if you are registered on Udyam. Confirm the current Bank Rate and "
+                    "your registration status with your CA before claiming a figure."
+                ),
+            },
         },
     }

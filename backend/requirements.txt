@@ -4,3 +4,7 @@ pydantic==2.10.4
 httpx==0.28.1
 motor==3.6.0
 python-dotenv==1.0.1
+# Added for invoice upload + reading. Both are optional at runtime:
+# the app degrades to paste/CSV input if either is unavailable.
+python-multipart==0.0.20
+pymupdf==1.25.2

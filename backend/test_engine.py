@@ -1,5 +1,5 @@
 from datetime import date, timedelta
-import engine, messages as msg
+import engine, extract, messages as msg
 
 TODAY = date(2026, 8, 27)
 
@@ -99,6 +99,90 @@ def test_messages_tiers_and_formatting():
         assert x["subject"]
     assert msg.fmt_money(1234567, "INR") == "₹12,34,567", msg.fmt_money(1234567, "INR")
     assert msg.fmt_money(5000, "USD") == "$5,000"
+
+
+def test_extract_text_invoice_formats():
+    cases = [
+        ("""TAX INVOICE
+Sharma Textiles Pvt Ltd
+GSTIN: 27AABCS1234F1Z5
+Invoice No: ST/2026/0417
+Invoice Date: 12 May 2026
+Due Date: 26 June 2026
+Bill To:
+Kapoor Garments LLP
+accounts@kapoor.example
++91 98200 11223
+TOTAL 2,02,125""",
+         dict(customer="Kapoor Garments LLP", invoice_no="ST/2026/0417",
+              amount=202125.0, due_date="2026-06-26")),
+        ("""INVOICE #A-99120
+Date: 03/14/2026
+Terms: Net 30
+Bill To: Northwind Design Studio
+Grand Total: $4,536.00""",
+         dict(customer="Northwind Design Studio", invoice_no="A-99120",
+              amount=4536.0, due_date="2026-04-13")),
+        ("""Bill No : KT/24-25/881
+Dated 05-01-2026
+Buyer: Verma Hardware Stores
+Total Amount Payable Rs. 87,450/-""",
+         dict(customer="Verma Hardware Stores", invoice_no="KT/24-25/881",
+              amount=87450.0, due_date="2026-02-19")),
+    ]
+    for text, want in cases:
+        got = extract.parse_invoice_text(text)
+        for k, v in want.items():
+            assert got[k] == v, f"{k}: got {got[k]!r} want {v!r}\n{got}"
+        assert got["confidence"] == "high"
+
+
+def test_extract_ignores_junk():
+    got = extract.parse_invoice_text("Thank you for your business. See you soon.")
+    assert got["amount"] is None and got["confidence"] == "low"
+    assert extract.parse_invoice_text("")["amount"] is None
+
+
+def test_extract_does_not_read_heading_as_invoice_number():
+    # "TAX INVOICE\nAcme Ltd" must not yield invoice_no="Acme"
+    got = extract.parse_invoice_text("TAX INVOICE\nAcme Ltd\nTotal 5000")
+    assert got["invoice_no"] == "", got
+
+
+def test_msmed_interest():
+    # 5,00,000 late by 150 days at a 5.5% bank rate -> 16.5% p.a., monthly rests
+    v = engine.msmed_interest(500000, 150, 5.50)
+    assert abs(v - 34808.25) < 1.0, v
+    assert engine.msmed_interest(500000, 0, 5.50) == 0.0
+    assert engine.msmed_interest(500000, -30, 5.50) == 0.0
+    assert engine.msmed_interest(500000, 150, 0) == 0.0
+    # monotonic in time
+    prev = -1
+    for d in range(0, 400, 20):
+        cur = engine.msmed_interest(100000, d, 5.50)
+        assert cur >= prev, (d, cur, prev)
+        prev = cur
+
+
+def test_statutory_clause_only_where_it_belongs():
+    text = ("Customer,Invoice No,Amount,Due Date\n"
+            f"Old Debt,INV-1,500000,{d(150)}\n"
+            f"Fresh,INV-2,20000,{d(8)}\n"
+            f"Tiny,INV-3,300,{d(200)}\n")
+    inv, _ = engine.parse_invoices(text, today=TODAY)
+    r = engine.analyse(inv, today=TODAY, bank_rate=5.50)
+    m = {x["customer"]: x for x in msg.build_messages(
+        r["priority"], sender="D", company="N", statutory_rate=r["statutory_rate"])}
+    assert "MSMED" in m["Old Debt"]["email"], "150-day bill should carry the clause"
+    assert "MSMED" not in m["Fresh"]["email"], "8-day bill must not threaten a statute"
+    assert "MSMED" not in m["Tiny"]["email"], "interest under 100 is not worth quoting"
+    # sign-off must stay last in both channels
+    assert m["Old Debt"]["email"].rstrip().endswith("N")
+    assert m["Old Debt"]["whatsapp"].rstrip().endswith("D, N")
+    # switching MSMED off removes it everywhere
+    r2 = engine.analyse(inv, today=TODAY, bank_rate=None)
+    m2 = msg.build_messages(r2["priority"], sender="D", company="N", statutory_rate=None)
+    assert all("MSMED" not in x["email"] for x in m2)
 
 
 if __name__ == "__main__":

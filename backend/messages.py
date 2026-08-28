@@ -109,18 +109,52 @@ def _email_body(tier: str, inv: dict[str, Any], sender: str, company: str, curre
     return body
 
 
-def _whatsapp(tier: str, inv: dict[str, Any], sender: str, company: str, currency: str) -> str:
+def _whatsapp(tier: str, inv: dict[str, Any], sender: str, company: str, currency: str,
+              clause: str = "") -> str:
     name = inv["customer"].split()[0] if inv["customer"] else "Hi"
     ref = inv.get("invoice_no") or "the invoice"
     amt = fmt_money(inv["amount"], currency)
     days = inv["days_overdue"]
     tail = f"— {sender}, {company}".strip(" ,-")
-    return {
-        "reminder": f"Hi {name}, quick reminder that {ref} ({amt}) is due. Anything you need from me to release it? {tail}",
-        "firm": f"Hi {name}, {ref} ({amt}) is {days} days past due. Can you give me a payment date today? {tail}",
-        "escalation": f"{name}, {ref} ({amt}) is {days} days overdue and I have no payment date. I am holding new work until it clears. Can we sort this out today? {tail}",
-        "final": f"{name}, final notice on {ref} ({amt}), {days} days overdue. Payment or a payment plan within 7 days, or it goes to recovery. Please call me. {tail}",
+    core = {
+        "reminder": f"Hi {name}, quick reminder that {ref} ({amt}) is due. Anything you need from me to release it?",
+        "firm": f"Hi {name}, {ref} ({amt}) is {days} days past due. Can you give me a payment date today?",
+        "escalation": f"{name}, {ref} ({amt}) is {days} days overdue and I have no payment date. I am holding new work until it clears. Can we sort this out today?",
+        "final": f"{name}, final notice on {ref} ({amt}), {days} days overdue. Payment or a payment plan within 7 days, or it goes to recovery. Please call me.",
     }[tier]
+    # The sign-off always goes last, after any statutory note.
+    return " ".join(x for x in (core, clause.strip(), tail) if x)
+
+
+def _statutory_clause(inv: dict[str, Any], currency: str, rate: float | None, channel: str) -> str:
+    """Optional MSMED paragraph. Only for genuinely late, material invoices —
+    quoting a statute over a three-day delay reads as bluster, not leverage."""
+    amt = inv.get("statutory_interest") or 0
+    if not rate or amt < 100 or inv.get("days_overdue", 0) <= 45:
+        return ""
+    money = fmt_money(amt, currency)
+    if channel == "whatsapp":
+        return f"Statutory interest under the MSMED Act has also accrued to about {money}."
+    if inv["tier"] == "final":
+        return (
+            f"\n\nSeparately: under Section 16 of the MSMED Act, 2006, this delay has accrued "
+            f"approximately {money} in statutory interest at {rate}% per annum, compounded "
+            "monthly. If this is not settled I will register the claim on the MSME Samadhaan "
+            "portal. I would prefer to close it between us."
+        )
+    return (
+        f"\n\nFor completeness: under the MSMED Act, 2006 a delay of this length accrues "
+        f"statutory interest at {rate}% per annum, currently around {money}. I am not pursuing "
+        "that, and would rather just agree a payment date."
+    )
+
+
+def _insert_clause(body: str, clause: str) -> str:
+    """Place the clause above the sign-off rather than after it."""
+    if not clause:
+        return body
+    parts = body.rsplit("\n\n", 1)
+    return (parts[0] + clause + "\n\n" + parts[1]) if len(parts) == 2 else body + clause
 
 
 def build_messages(
@@ -129,6 +163,7 @@ def build_messages(
     company: str = "",
     currency: str = "INR",
     limit: int = 10,
+    statutory_rate: float | None = None,
 ) -> list[dict[str, Any]]:
     sender = (sender or "").strip()[:80]
     company = (company or "").strip()[:80]
@@ -146,7 +181,11 @@ def build_messages(
             "to_email": inv.get("email", ""),
             "to_phone": inv.get("phone", ""),
             "subject": _subject(tier, inv, currency),
-            "email": _email_body(tier, inv, sender or "[Your name]", company or "[Your company]", currency),
-            "whatsapp": _whatsapp(tier, inv, sender or "[Your name]", company or "[Your company]", currency),
+            "statutory_interest": inv.get("statutory_interest", 0),
+            "email": _insert_clause(
+                _email_body(tier, inv, sender or "[Your name]", company or "[Your company]", currency),
+                _statutory_clause(inv, currency, statutory_rate, "email")),
+            "whatsapp": _whatsapp(tier, inv, sender or "[Your name]", company or "[Your company]",
+                                  currency, _statutory_clause(inv, currency, statutory_rate, "whatsapp")),
         })
     return out
