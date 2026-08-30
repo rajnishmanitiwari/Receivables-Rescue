@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from datetime import date, datetime, timezone
 
@@ -50,6 +51,10 @@ try:
         _db = _client[os.environ.get("DB_NAME", "receivables_rescue")]
 except Exception as exc:  # pragma: no cover
     logger.warning("Mongo unavailable, running stateless: %s", exc)
+
+
+class WaitlistRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=160)
 
 
 class AnalyseRequest(BaseModel):
@@ -132,6 +137,24 @@ async def analyse(req: AnalyseRequest):
             pass
 
     return {"report": report, "messages": followups, "warnings": warnings, "currency": req.currency}
+
+
+@api.post("/waitlist")
+async def waitlist(req: WaitlistRequest):
+    """Capture interest for the upcoming AI auto-chase agent. Best-effort, no PII beyond email."""
+    email = req.email.strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address.")
+    if _db is not None:
+        try:
+            await _db.waitlist.update_one(
+                {"_id": email},
+                {"$set": {"email": email, "created_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True,
+            )
+        except Exception:
+            logger.exception("waitlist write failed")
+    return {"ok": True}
 
 
 def _register_upload_route() -> bool:

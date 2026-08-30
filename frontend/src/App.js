@@ -198,6 +198,76 @@ function MessageCard({ m, currency }) {
   );
 }
 
+function WaitlistToast({ active }) {
+  const [visible, setVisible] = useState(false);
+  const [dismissed, setDismissed] = useState(() => sessionStorage.getItem("rr_waitlist_seen") === "1");
+  const [email, setEmail] = useState("");
+  const [state, setState] = useState("idle"); // idle | sending | done | error
+
+  useEffect(() => {
+    if (!active || dismissed) return;
+    const t = setTimeout(() => setVisible(true), 4500);
+    return () => clearTimeout(t);
+  }, [active, dismissed]);
+
+  const close = () => {
+    setVisible(false);
+    setDismissed(true);
+    sessionStorage.setItem("rr_waitlist_seen", "1");
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!email.trim() || state === "sending") return;
+    setState("sending");
+    try {
+      const res = await fetch(API + "/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      if (!res.ok) throw new Error();
+      setState("done");
+      sessionStorage.setItem("rr_waitlist_seen", "1");
+      setTimeout(() => setVisible(false), 3200);
+    } catch {
+      setState("error");
+    }
+  };
+
+  if (dismissed || !visible) return null;
+
+  return (
+    <div className="waitlist-toast" role="dialog" aria-label="Join the AI auto-chase waitlist" data-testid="waitlist-toast">
+      <button type="button" className="waitlist-close" onClick={close} aria-label="Dismiss" data-testid="waitlist-close-btn">&times;</button>
+      {state === "done" ? (
+        <div className="waitlist-done" data-testid="waitlist-success-message">
+          <strong>You're on the list.</strong>
+          <span>We'll email you the moment auto-chase is ready.</span>
+        </div>
+      ) : (
+        <>
+          <div className="waitlist-title">What's next: an agent that chases for you</div>
+          <p className="waitlist-sub">
+            Soon, Receivables Rescue can auto-fetch new invoices and follow up with late payers for
+            you. Get notified when it ships.
+          </p>
+          <form className="waitlist-form" onSubmit={submit}>
+            <input
+              type="email" required placeholder="you@business.com" value={email}
+              onChange={(e) => setEmail(e.target.value)} data-testid="waitlist-email-input"
+            />
+            <button type="submit" className="btn primary sm" disabled={state === "sending"} data-testid="waitlist-submit-btn">
+              {state === "sending" ? "…" : "Notify me"}
+            </button>
+          </form>
+          {state === "error" ? <span className="waitlist-error" data-testid="waitlist-error-message">Could not save that — try again.</span> : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 
 export default function App() {
@@ -542,6 +612,8 @@ export default function App() {
           </div>
         ) : null}
       </main>
+
+      <WaitlistToast active={!!rep} />
 
       <footer className="wrap foot">
         <p>

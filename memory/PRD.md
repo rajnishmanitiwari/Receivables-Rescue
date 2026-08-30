@@ -99,7 +99,21 @@ its users are on slow mobile connections.
   `/health` because that reflects the **previous** deployment, before this
   fix — resolves once the app is redeployed.
 
+### 2026-08-30 (AEO + waitlist) — Emergent
+- `frontend/public/llms.txt`, `robots.txt`, `sitemap.xml` added; JSON-LD
+  (`schema.org/WebApplication`) injected in `index.html` `<head>`. All static,
+  no product-copy changes.
+- `POST /api/waitlist` added (email capture, upserts into `_db.waitlist`,
+  gracefully no-ops without Mongo). `WaitlistToast` in `App.js`: only mounts
+  after a result exists (`rep`), 4.5s delay, dismissible, bottom-right,
+  `sessionStorage`-gated so it shows once per session. Verified via
+  screenshot: absent on landing, appears post-results, submits successfully.
+- Proposed (not built) a "60-second demo mode" architecture: scripted state
+  machine driving the real engine/UI (not a video), `?demo=1` shareable entry
+  point — awaiting go-ahead.
+
 ## Backlog
+- 60-second guided demo mode (see work log above) — awaiting go-ahead to build.
 - Verify the NVIDIA / Kimi vision endpoint against a real scanned invoice; it
   has not been exercised end to end.
 - Consider raising `MAX_UPLOAD_MB` on container hosts (default 4 MB is a Vercel
