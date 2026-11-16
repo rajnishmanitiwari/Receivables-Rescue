@@ -25,6 +25,7 @@ import engine
 import extract
 import llm
 import messages as msg
+import followup_planner as fp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("receivables")
@@ -204,6 +205,43 @@ async def extract_files(files: list[UploadFile] = File(...)):
 
 
 UPLOAD_ENABLED = _register_upload_route()
+
+class PlanEventIn(BaseModel):
+    day: date
+    type: str = Field(..., pattern="^(sent|reply|payment)$")
+    text: str | None = Field(None, max_length=2000)   # reply text; classified by a keyword baseline
+    label: str | None = None                         # or pass an explicit label
+    promise_date: date | None = None
+    amount: float | None = Field(None, ge=0)
+    tier: str | None = None
+
+
+class PlanRequest(BaseModel):
+    number: str = Field(..., max_length=60)
+    amount: float = Field(..., gt=0)
+    due: date
+    status: str = Field("open", pattern="^(open|void|paid)$")
+    today: date | None = None
+    events: list[PlanEventIn] = Field(default_factory=list, max_length=200)
+
+
+@api.post("/next-action")
+async def next_action(req: PlanRequest):
+    """Deterministic follow-up decision prototype. Sends nothing; the caller decides."""
+    evs = []
+    for e in req.events:
+        label = None
+        if e.type == "reply":
+            try:
+                label = fp.Label(e.label) if e.label else fp.classify_reply(e.text or "")
+            except ValueError:
+                raise HTTPException(422, "unknown label")
+        evs.append(fp.Event(e.day, e.type, label, e.promise_date, e.amount, e.tier))
+    inv = fp.Invoice(req.number, req.amount, req.due, req.status)
+    a = fp.next_action(inv, evs, req.today or date.today())
+    return {"kind": a.kind.value, "reason": a.reason, "tier": a.tier,
+            "until": a.until.isoformat() if a.until else None, "prototype": True}
+
 
 app.include_router(api)
 
