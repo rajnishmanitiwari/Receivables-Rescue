@@ -153,7 +153,7 @@ function Aging({ buckets, currency }) {
             />
           </div>
           <div className="aging-amt">{money(b.amount, currency)}</div>
-          <div className="aging-pct">{b.probability}% usually gets paid</div>
+          <div className="aging-pct">{b.probability}% assumed collected (heuristic)</div>
         </div>
       ))}
     </div>
