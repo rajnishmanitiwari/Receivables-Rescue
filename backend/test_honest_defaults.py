@@ -4,13 +4,13 @@ import server
 
 c = TestClient(server.app)
 
-def test_interest_is_off_until_a_rate_is_supplied():
+def test_interest_is_disabled():
     d = "Acme, INV-1, 45000, 2026-01-01"
     r = c.post("/api/analyse", json={"data": d}).json()["report"]
     assert not r["statutory_interest_total"]
     assert r["assumptions"]["msmed"]["enabled"] is False
     r2 = c.post("/api/analyse", json={"data": d, "bank_rate": 5.0}).json()["report"]
-    assert r2["statutory_interest_total"] > 0
+    assert not r2["statutory_interest_total"], "interest stays off while its basis is unverified"
 
 def test_health_does_not_prefill_a_bank_rate():
     assert c.get("/api/health").json()["default_bank_rate"] is None

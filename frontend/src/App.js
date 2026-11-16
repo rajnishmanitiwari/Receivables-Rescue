@@ -214,8 +214,6 @@ export default function App() {
   const [currency, setCurrency] = useState("INR");
   const [sender, setSender] = useState("");
   const [company, setCompany] = useState("");
-  const [msme, setMsme] = useState(false);
-  const [bankRate, setBankRate] = useState("");
 
   const resultRef = useRef(null);
   const reviewRef = useRef(null);
@@ -273,7 +271,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           data: rowsToCsv(clean), currency, sender_name: sender, company_name: company,
-          bank_rate: msme && currency === "INR" ? Number(bankRate) || null : null,
+          bank_rate: null,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -282,7 +280,7 @@ export default function App() {
     } catch (err) {
       setError(err.message || "Something went wrong. Try again.");
     } finally { setBusy(false); }
-  }, [rows, currency, sender, company, msme, bankRate]);
+  }, [rows, currency, sender, company]);
 
   const rep = result && result.report;
 
@@ -406,24 +404,7 @@ export default function App() {
                     <option value="AED">UAE Dirham</option>
                   </select>
                 </div>
-                {currency === "INR" ? (
-                  <>
-                    <div className="field check">
-                      <label htmlFor="msme">
-                        <input id="msme" type="checkbox" checked={msme} onChange={(e) => setMsme(e.target.checked)} />
-                        <span>Add an interest estimate (only if I am a registered Udyam micro or small supplier)</span>
-                      </label>
-                      <small>Optional. Eligibility depends on your registration and the agreed credit period; check with your CA.</small>
-                    </div>
-                    {msme ? (
-                      <div className="field">
-                        <label htmlFor="rate">RBI Bank Rate (%)</label>
-                        <input id="rate" inputMode="decimal" value={bankRate} onChange={(e) => setBankRate(e.target.value)} />
-                        <small>Enter the current RBI Bank Rate from rbi.org.in. No figure is shown until you do.</small>
-                      </div>
-                    ) : null}
-                  </>
-                ) : null}
+                
               </div>
             ) : null}
 

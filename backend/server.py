@@ -38,6 +38,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# MSMED interest is off: its applicability and formula are not verified against the Act and
+# notified rules. Set ENABLE_MSMED_INTEREST=1 only after that review.
+INTEREST_ENABLED = os.environ.get("ENABLE_MSMED_INTEREST") == "1"
+
 api = APIRouter(prefix="/api")
 
 # --- Mongo is used ONLY for an anonymous aggregate counter. No invoice data,
@@ -115,7 +119,7 @@ async def analyse(req: AnalyseRequest):
         logger.exception("parse failure")
         raise HTTPException(status_code=422, detail="Could not read that file. Check the format and try again.") from exc
 
-    report = engine.analyse(invoices, today=date.today(), bank_rate=req.bank_rate)
+    report = engine.analyse(invoices, today=date.today(), bank_rate=req.bank_rate if INTEREST_ENABLED else None)
     followups = msg.build_messages(
         report["priority"],
         sender=req.sender_name,
