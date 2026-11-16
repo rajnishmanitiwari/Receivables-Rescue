@@ -66,7 +66,7 @@ class AnalyseRequest(BaseModel):
     tone: str = Field("professional and direct", max_length=60)
     language: str = Field("English", max_length=40)
     # None switches the MSMED statutory-interest calculation off (non-India users).
-    bank_rate: float | None = Field(engine.RBI_BANK_RATE_DEFAULT, ge=0, le=25)
+    bank_rate: float | None = Field(None, ge=0, le=25)
 
 
 @api.get("/health")
@@ -84,7 +84,7 @@ async def health():
         "upload": globals().get("UPLOAD_ENABLED", False),
         "max_upload_mb": extract.MAX_BYTES // (1024 * 1024),
         "db": _db is not None,
-        "default_bank_rate": engine.RBI_BANK_RATE_DEFAULT,
+        "default_bank_rate": None,
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -146,6 +146,8 @@ async def waitlist(req: WaitlistRequest):
     email = req.email.strip().lower()
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         raise HTTPException(status_code=422, detail="Enter a valid email address.")
+    if _db is None:
+        raise HTTPException(status_code=503, detail="Sign-ups are not open yet; nothing was saved.")
     if _db is not None:
         try:
             await _db.waitlist.update_one(

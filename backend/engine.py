@@ -396,8 +396,8 @@ def analyse(invoices: list[Invoice], today: date | None = None,
     old_amt = sum(i.amount for i in invoices if i.days_overdue > 90)
     if old_amt > 0 and total:
         risks.append(
-            f"{round(old_amt / total * 100)}% of your book is past 90 days, where roughly "
-            "half of it historically never gets collected. Chase or write off — do not drift."
+            f"{round(old_amt / total * 100)}% of your book is past 90 days, where the generic aging "
+            "heuristic assumes collection odds fall sharply (not validated on your customers). Chase or decide — do not drift."
         )
     if not overdue:
         risks.append("Nothing is overdue yet. Send the pre-due nudges below and keep it that way.")

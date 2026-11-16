@@ -198,78 +198,6 @@ function MessageCard({ m, currency }) {
   );
 }
 
-function WaitlistToast({ active }) {
-  const [visible, setVisible] = useState(false);
-  const [dismissed, setDismissed] = useState(() => sessionStorage.getItem("rr_waitlist_seen") === "1");
-  const [email, setEmail] = useState("");
-  const [state, setState] = useState("idle"); // idle | sending | done | error
-
-  useEffect(() => {
-    if (!active || dismissed) return;
-    const t = setTimeout(() => setVisible(true), 4500);
-    return () => clearTimeout(t);
-  }, [active, dismissed]);
-
-  const close = () => {
-    setVisible(false);
-    setDismissed(true);
-    sessionStorage.setItem("rr_waitlist_seen", "1");
-  };
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!email.trim() || state === "sending") return;
-    setState("sending");
-    try {
-      const res = await fetch(API + "/api/waitlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      if (!res.ok) throw new Error();
-      setState("done");
-      sessionStorage.setItem("rr_waitlist_seen", "1");
-      setTimeout(() => setVisible(false), 3200);
-    } catch {
-      setState("error");
-    }
-  };
-
-  if (dismissed || !visible) return null;
-
-  return (
-    <div className="waitlist-toast" role="dialog" aria-label="Join the AI auto-chase waitlist" data-testid="waitlist-toast">
-      <button type="button" className="waitlist-close" onClick={close} aria-label="Dismiss" data-testid="waitlist-close-btn">&times;</button>
-      {state === "done" ? (
-        <div className="waitlist-done" data-testid="waitlist-success-message">
-          <strong>You're on the list.</strong>
-          <span>We'll email you the moment auto-chase is ready.</span>
-        </div>
-      ) : (
-        <>
-          <div className="waitlist-title">What's next: an agent that chases for you</div>
-          <p className="waitlist-sub">
-            Soon, Receivables Rescue can auto-fetch new invoices and follow up with late payers for
-            you. Get notified when it ships.
-          </p>
-          <form className="waitlist-form" onSubmit={submit}>
-            <input
-              type="email" required placeholder="you@business.com" value={email}
-              onChange={(e) => setEmail(e.target.value)} data-testid="waitlist-email-input"
-            />
-            <button type="submit" className="btn primary sm" disabled={state === "sending"} data-testid="waitlist-submit-btn">
-              {state === "sending" ? "…" : "Notify me"}
-            </button>
-          </form>
-          {state === "error" ? <span className="waitlist-error" data-testid="waitlist-error-message">Could not save that — try again.</span> : null}
-        </>
-      )}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-
 export default function App() {
   const [rows, setRows] = useState([]);
   const [notes, setNotes] = useState([]);
@@ -286,8 +214,8 @@ export default function App() {
   const [currency, setCurrency] = useState("INR");
   const [sender, setSender] = useState("");
   const [company, setCompany] = useState("");
-  const [msme, setMsme] = useState(true);
-  const [bankRate, setBankRate] = useState(5.5);
+  const [msme, setMsme] = useState(false);
+  const [bankRate, setBankRate] = useState("");
 
   const resultRef = useRef(null);
   const reviewRef = useRef(null);
@@ -297,7 +225,6 @@ export default function App() {
     fetch(API + "/api/health").then((r) => r.json())
       .then((h) => {
         setCaps(h);
-        if (h.default_bank_rate) setBankRate(h.default_bank_rate);
         if (h.upload === false) setShowPaste(true);
       })
       .catch(() => {});
@@ -484,15 +411,15 @@ export default function App() {
                     <div className="field check">
                       <label htmlFor="msme">
                         <input id="msme" type="checkbox" checked={msme} onChange={(e) => setMsme(e.target.checked)} />
-                        <span>I am registered on Udyam (MSME)</span>
+                        <span>Add an interest estimate (only if I am a registered Udyam micro or small supplier)</span>
                       </label>
-                      <small>Adds the late-payment interest the MSMED Act entitles you to.</small>
+                      <small>Optional. Eligibility depends on your registration and the agreed credit period; check with your CA.</small>
                     </div>
                     {msme ? (
                       <div className="field">
                         <label htmlFor="rate">RBI Bank Rate (%)</label>
                         <input id="rate" inputMode="decimal" value={bankRate} onChange={(e) => setBankRate(e.target.value)} />
-                        <small>Check today's rate on rbi.org.in before you quote a figure.</small>
+                        <small>Enter the current RBI Bank Rate from rbi.org.in. No figure is shown until you do.</small>
                       </div>
                     ) : null}
                   </>
@@ -522,25 +449,25 @@ export default function App() {
                 <div className="stat-sub">{plural(rep.invoice_count, "bill", "bills")} &middot; {plural(rep.customer_count, "customer", "customers")}</div>
               </div>
               <div className="stat good">
-                <div className="stat-label">Likely to actually arrive</div>
+                <div className="stat-label">Rough estimate to arrive</div>
                 <div className="stat-value">{money(rep.expected_recoverable, currency)}</div>
                 <div className="stat-sub">{money(rep.at_risk, currency)} is already at risk</div>
               </div>
               <div className="stat bad">
-                <div className="stat-label">Lost if you wait 30 more days</div>
+                <div className="stat-label">Estimated loss if you wait 30 more days</div>
                 <div className="stat-value">{money(rep.cost_of_waiting_30d, currency)}</div>
-                <div className="stat-sub">Every day of silence has a price</div>
+                <div className="stat-sub">Generic heuristic, not a prediction</div>
               </div>
             </section>
 
             {rep.statutory_interest_total > 0 ? (
               <section className="card msme-card">
-                <h2>You are also owed interest</h2>
+                <h2>Possible late-payment interest (estimate)</h2>
                 <p className="msme-figure">{money(rep.statutory_interest_total, currency)}</p>
                 <p>
                   Under the MSMED Act, a buyer who pays a registered micro or small business late owes
                   compound interest at <strong>{rep.statutory_rate}% a year</strong> &mdash; three times
-                  the RBI Bank Rate. Most small businesses never ask for it. It is now written into your
+                  the RBI Bank Rate. It is now written into your
                   final-notice messages below.
                 </p>
                 <p className="fineprint">{rep.assumptions.msmed.note}</p>
@@ -613,13 +540,11 @@ export default function App() {
         ) : null}
       </main>
 
-      <WaitlistToast active={!!rep} />
 
       <footer className="wrap foot">
         <p>
           Your bills are read to build this page and are never stored, logged or shared. Receivables
-          Rescue is not legal, accounting or debt-collection advice; collection percentages are
-          industry benchmarks, and the interest figure is an estimate to check with your accountant.
+          Rescue is not legal, accounting or debt-collection advice; the collection percentages are a generic aging heuristic, not validated on your customers, and any interest figure is an estimate to check with your accountant.
         </p>
       </footer>
     </div>
