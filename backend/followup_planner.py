@@ -33,6 +33,7 @@ class Event:
     promise_date: date | None = None
     amount: float | None = None
     tier: str | None = None
+    flags: frozenset = frozenset()   # "optout" / "dispute" from reply_flags; survives label loss
 
 @dataclass(frozen=True)
 class Invoice:
@@ -42,9 +43,11 @@ class Invoice:
 class Action:
     kind: Kind; reason: str; tier: str | None = None; until: date | None = None
 
+_RE_DISPUTE = r"\b(disput\w*|incorrect|wrong amount|not (our|my) invoice|never received (the )?(goods|service)|not delivered|overcharged|(invoice|bill|amount|charge) is wrong)\b"
+_RE_OPTOUT = r"\b(stop (emailing|contacting|sending)|do not (contact|email)|don't (email|contact)|unsubscribe|remove me|opt( me)?[ -]?out)\b|^\s*stop[.!\s]*$"
 _PATTERNS = [
-    (Label.DONT_CONTACT, r"\b(stop (emailing|contacting)|do not contact|unsubscribe|remove me)\b|^\s*stop[.!\s]*$"),
-    (Label.DISPUTE, r"\b(disput\w*|incorrect|wrong amount|not (our|my) invoice|never received (the )?(goods|service)|not delivered|overcharged|(invoice|bill|amount|charge) is wrong)\b"),
+    (Label.DONT_CONTACT, _RE_OPTOUT),
+    (Label.DISPUTE, _RE_DISPUTE),
     (Label.PAID, r"\b(already paid|have paid|has been paid|payment (was )?made|payment (is )?done|paid on|paid (this|it|that|the invoice|the bill|invoice))\b"),
     (Label.PROMISE, r"\b(will pay|will transfer|pay (you )?(by|on)|paying (today|tomorrow|tonight)|payment (will|is) (be )?(made|scheduled)|processing (the )?payment|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|month end|eom))\b"),
     (Label.PARTIAL, r"\b(partial payment|part payment|paid half|paid part)\b"),
@@ -54,6 +57,36 @@ _PATTERNS = [
 # match drops the reply to UNKNOWN, which sends it to a human - never to a wrong follow-up.
 _NEG_PAID = re.compile(r"\b(did not|didn't|didnt|have not|haven't|havent|has not|hasn't|hasnt|never|not)\b[^.!?;]{0,40}\b(paid|payment (was )?made|payment done)\b")
 _NEG_DISPUTE = re.compile(r"\bno disput\w*\b")
+# Qualified or negated opt-outs are NOT clear opt-outs. "Not opting out", a channel or
+# address change ("don't email, call me"), excluding a third party ("stop contacting my
+# accountant") or one disputed invoice all need a human - never a sticky STOP.
+_OPT_NEGATED = re.compile(
+    r"\b(do not|don't|does not|doesn't|will not|won't|wont|would not|wouldn't|never)\s+"
+    r"(stop\b|opt(ing)?(\s+me)?[ -]?out)"
+    r"|\bnot\s+(opting?(\s+me)?[ -]?out|asking|saying|telling)\b"
+    r"|\bdoes\s*not\s+mean\s+stop\b|\bdoesn'?t\s+mean\s+stop\b"
+)
+_OPT_QUALIFIED = re.compile(
+    r"\b(don'?t|do not|stop)\s+(email|mail|contact|message|send)\w*\b[^.!?;]{0,60}?\b("
+    r"this (address|e?mail|number|invoice|bill)|that (address|e?mail|invoice|bill)|"
+    r"(same|old|corrected) (invoice|bill|address|e?mail|copy)|"
+    r"my other|work e?mail|personal e?mail|"
+    r"call me|call instead|phone|whatsapp|text me|sms|letter|instead|"
+    r"accountant|bookkeeper|ca\b|chartered|finance team|accounts team|lawyer|advocate|"
+    r"weekends?|weekdays?|at night|after hours)\b"
+)
+
+def reply_flags(text: str) -> frozenset:
+    """Independent of the single returned label: a reply can carry BOTH a clear opt-out
+    and a dispute. The planner uses these flags so dual-intent replies keep the
+    no-contact sticky AND get a human for the dispute."""
+    t = text.lower()
+    out = set()
+    if re.search(_RE_OPTOUT, t) and not (_OPT_NEGATED.search(t) or _OPT_QUALIFIED.search(t)):
+        out.add("optout")
+    if re.search(_RE_DISPUTE, t) and not _NEG_DISPUTE.search(t):
+        out.add("dispute")
+    return frozenset(out)
 
 def classify_reply(text: str) -> Label:
     """Keyword baseline with negation guards. Order matters: disputes and opt-outs win over 'paid'."""
@@ -63,6 +96,8 @@ def classify_reply(text: str) -> Label:
             if label == Label.PAID and _NEG_PAID.search(t):
                 continue
             if label == Label.DISPUTE and _NEG_DISPUTE.search(t):
+                continue
+            if label == Label.DONT_CONTACT and (_OPT_NEGATED.search(t) or _OPT_QUALIFIED.search(t)):
                 continue
             return label
     return Label.UNKNOWN
@@ -82,7 +117,16 @@ def next_action(inv: Invoice, events: list[Event], today: date) -> Action:
     evs = sorted((e for e in events if e.day <= today), key=lambda e: e.day)
     replies = [e for e in evs if e.type == "reply"]
     # Opt-out and dispute are sticky: no later event reopens them without a human.
-    if any(e.label == Label.DONT_CONTACT for e in replies):
+    optouts = [e for e in replies if e.label == Label.DONT_CONTACT or "optout" in e.flags]
+    if optouts:
+        dispute_open = any(
+            (e.label == Label.DISPUTE or "dispute" in e.flags)
+            and not any(r.type == "resolved" and r.day >= e.day for r in evs)
+            for e in replies)
+        if dispute_open:
+            # Dual intent: keep no-contact sticky AND get a person for the dispute.
+            # After resolution the opt-out still stands: no resume without re-consent.
+            return Action(Kind.HUMAN, "opt-out recorded with an open dispute; a person must resolve it - no further contact without explicit re-consent")
         return Action(Kind.STOP, "contact opt-out recorded")
     if any(e.label == Label.DISPUTE for e in replies):
         return Action(Kind.PAUSE, "dispute recorded; a person must resolve it")

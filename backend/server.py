@@ -17,8 +17,9 @@ try:
 except Exception:
     pass
 
-from fastapi import APIRouter, FastAPI, File, HTTPException, UploadFile
+from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 import engine
@@ -31,13 +32,62 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("receivables")
 
 app = FastAPI(title="Receivables Rescue API", version="1.0.0")
+# Browser access defaults to the known production frontends; CORS_ORIGINS can
+# widen or narrow it per deployment. This is an origin check, not rate limiting.
+_DEFAULT_ORIGINS = (
+    "https://duerise.vercel.app,"
+    "https://receivables-rescue.vercel.app,"
+    "http://localhost:3000,http://localhost:8090"
+)
+# Simple abuse cap: fixed-window per client IP. On serverless this is per
+# instance, so it blunts bursts rather than guaranteeing a global limit.
+_hits: dict[str, list[float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    # Vercel's edge overwrites X-Forwarded-For with the real client IP and does not
+    # forward client-sent values (anti-spoofing, per the official request-headers
+    # docs), so it is trusted only when x-vercel-id shows the request really came
+    # through Vercel. Off Vercel, use the direct peer. When nothing reliable
+    # exists, everyone shares the "unknown" bucket - the cap still applies.
+    if request.headers.get("x-vercel-id"):
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    if request.url.path.startswith("/api/") and request.method != "OPTIONS":
+        import time
+
+        limit = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "60"))
+        ip = _client_ip(request)
+        now = time.time()
+        window = _hits.setdefault(ip, [])
+        window[:] = [t for t in window if now - t < 60.0]
+        if len(window) >= limit:
+            return JSONResponse(
+                {"detail": "Too many requests. Try again in a minute."}, status_code=429
+            )
+        window.append(now)
+        if len(_hits) > 10000:  # keep the map bounded
+            _hits.clear()
+    return await call_next(request)
+
+
+# CORS is added last so it is the OUTERMOST middleware: preflight OPTIONS is
+# answered (and never counted) here, and every response - including a 429 from
+# the rate limiter - carries the CORS headers.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=os.environ.get("CORS_ORIGINS", _DEFAULT_ORIGINS).split(","),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 # MSMED interest is off: its applicability and formula are not verified against the Act and
 # notified rules. Set ENABLE_MSMED_INTEREST=1 only after that review.
 INTEREST_ENABLED = os.environ.get("ENABLE_MSMED_INTEREST") == "1"
@@ -237,12 +287,19 @@ async def next_action(req: PlanRequest):
     evs = []
     for e in req.events:
         label = None
+        flags = frozenset()
         if e.type == "reply":
             try:
                 label = fp.Label(e.label) if e.label else fp.classify_reply(e.text or "")
             except ValueError:
                 raise HTTPException(422, "unknown label")
-        evs.append(fp.Event(e.day, e.type, label, e.promise_date, e.amount, e.tier))
+            if e.text:
+                flags = fp.reply_flags(e.text)
+            elif label == fp.Label.DONT_CONTACT:
+                flags = frozenset({"optout"})
+            elif label == fp.Label.DISPUTE:
+                flags = frozenset({"dispute"})
+        evs.append(fp.Event(e.day, e.type, label, e.promise_date, e.amount, e.tier, flags))
     inv = fp.Invoice(req.number, req.amount, req.due, req.status)
     a = fp.next_action(inv, evs, req.today or date.today())
     return {"kind": a.kind.value, "reason": a.reason, "tier": a.tier,

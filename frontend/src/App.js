@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { safeEmailAddress, buildMailto } from "./mailto";
 import SAMPLE_ROWS from "./sample";
 
 const API = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
@@ -267,7 +268,10 @@ function MessageCard({ m, currency }) {
   const [channel, setChannel] = useState("whatsapp");
   const body = channel === "email" ? m.email : m.whatsapp;
   const wa = m.to_phone ? "https://wa.me/" + m.to_phone.replace(/[^0-9]/g, "") + "?text=" + encodeURIComponent(m.whatsapp) : null;
-  const mailto = m.to_email ? "mailto:" + m.to_email + "?subject=" + encodeURIComponent(m.subject) + "&body=" + encodeURIComponent(m.email) : null;
+  // Accept exactly one well-formed address; anything with control chars, query
+  // separators or extra recipients is dropped instead of interpolated.
+  const safeEmail = safeEmailAddress(m.to_email);
+  const mailto = buildMailto(m);
   return (
     <div className={"msg" + (open ? " open" : "")}>
       <button type="button" className="msg-head" onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -292,7 +296,7 @@ function MessageCard({ m, currency }) {
             <Copy text={channel === "email" ? m.subject + "\n\n" + m.email : m.whatsapp} label="Copy message" />
             {channel === "email" && mailto ? <a className="btn ghost sm" href={mailto}>Open in email</a> : null}
             {channel === "whatsapp" && wa ? <a className="btn primary sm" href={wa} target="_blank" rel="noreferrer">Send on WhatsApp</a> : null}
-            {!m.to_email && !m.to_phone ? <span className="hint">No email or phone saved for this one.</span> : null}
+            {!safeEmail && !m.to_phone ? <span className="hint">No email or phone saved for this one.</span> : null}
           </div>
           <FollowUp m={m} />
         </div>

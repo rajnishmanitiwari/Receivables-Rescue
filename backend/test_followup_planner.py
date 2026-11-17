@@ -18,8 +18,15 @@ class T(unittest.TestCase):
     def test_dispute_pauses_even_after_later_paid_claim(self):
         e = [Event(D - timedelta(days=9), "reply", Label.DISPUTE), Event(D - timedelta(days=2), "reply", Label.PAID)]
         self.assertEqual(next_action(inv(), e, D).kind, Kind.PAUSE)
-    def test_optout_stops_and_beats_dispute(self):
+    def test_optout_with_open_dispute_goes_human_then_stays_stopped(self):
+        # Dual intent (18 Nov review): no-contact is sticky AND a person must resolve the
+        # dispute; after resolution the opt-out still bars chasing without re-consent.
         e = [Event(D - timedelta(days=3), "reply", Label.DONT_CONTACT), Event(D - timedelta(days=9), "reply", Label.DISPUTE)]
+        self.assertEqual(next_action(inv(), e, D).kind, Kind.HUMAN)
+        e2 = e + [Event(D - timedelta(days=1), "resolved")]
+        self.assertEqual(next_action(inv(), e2, D).kind, Kind.STOP)
+    def test_optout_alone_stops(self):
+        e = [Event(D - timedelta(days=3), "reply", Label.DONT_CONTACT)]
         self.assertEqual(next_action(inv(), e, D).kind, Kind.STOP)
     def test_claimed_paid_without_payment_goes_to_human(self):
         self.assertEqual(next_action(inv(), [Event(D - timedelta(days=2), "reply", Label.PAID)], D).kind, Kind.HUMAN)
@@ -60,7 +67,8 @@ class T(unittest.TestCase):
                     evs.append(Event(day, "sent", tier=rnd.choice(["reminder", "firm", "escalation", "final"])))
             a = next_action(inv(rnd.randint(1, 90)), evs, D)
             labs = {e.label for e in evs if e.type == "reply"}
-            if Label.DONT_CONTACT in labs: self.assertEqual(a.kind, Kind.STOP)
+            if Label.DONT_CONTACT in labs and Label.DISPUTE in labs: self.assertEqual(a.kind, Kind.HUMAN)
+            elif Label.DONT_CONTACT in labs: self.assertEqual(a.kind, Kind.STOP)
             elif Label.DISPUTE in labs: self.assertEqual(a.kind, Kind.PAUSE)
             if a.kind == Kind.DRAFT:
                 sent = sorted((e for e in evs if e.type == "sent"), key=lambda e: e.day)
