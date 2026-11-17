@@ -36,7 +36,7 @@ TIER_LABELS = {
     "reminder": "Polite reminder",
     "firm": "Firm follow-up",
     "escalation": "Escalation",
-    "final": "Final notice before recovery",
+    "final": "Final notice",
 }
 
 TIER_GUIDANCE = {
@@ -100,9 +100,9 @@ def _email_body(tier: str, inv: dict[str, Any], sender: str, company: str, curre
             f"{name},\n\n"
             f"This is a final notice on {ref} for {amt}, now {days} days overdue "
             f"against a due date of {due}.\n\n"
-            "If payment or a signed payment plan is not received within 7 days, I will pass "
-            "this to recovery and stop all service on the account. I would rather not — "
-            "one email today ends it.\n\n"
+            "If payment or a payment plan is not received within 7 days, I will pause "
+            "all work on the account and hand this to a professional to pursue. "
+            "I would rather not — one email today ends it.\n\n"
             "Please treat this as time-sensitive.\n\n"
             f"Regards,\n{sign}"
         )
@@ -120,7 +120,7 @@ def _whatsapp(tier: str, inv: dict[str, Any], sender: str, company: str, currenc
         "reminder": f"Hi {name}, quick reminder that {ref} ({amt}) is due. Anything you need from me to release it?",
         "firm": f"Hi {name}, {ref} ({amt}) is {days} days past due. Can you give me a payment date today?",
         "escalation": f"{name}, {ref} ({amt}) is {days} days overdue and I have no payment date. I am holding new work until it clears. Can we sort this out today?",
-        "final": f"{name}, final notice on {ref} ({amt}), {days} days overdue. Payment or a payment plan within 7 days, or it goes to recovery. Please call me.",
+        "final": f"{name}, final notice on {ref} ({amt}), {days} days overdue. Payment or a payment plan within 7 days, or I will have to hand this to a professional. Please call me.",
     }[tier]
     # The sign-off always goes last, after any statutory note.
     return " ".join(x for x in (core, clause.strip(), tail) if x)
