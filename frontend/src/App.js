@@ -96,7 +96,7 @@ function Drop({ onFiles, busy }) {
       </div>
       <div className="drop-title">{busy ? "Reading your bills…" : "Drop your unpaid bills here"}</div>
       <div className="drop-sub">
-        A photo of an invoice, a PDF, or a spreadsheet. You can add several at once.
+        A PDF of an invoice, or a spreadsheet. You can add several at once.
       </div>
     </div>
   );
@@ -153,9 +153,111 @@ function Aging({ buckets, currency }) {
             />
           </div>
           <div className="aging-amt">{money(b.amount, currency)}</div>
-          <div className="aging-pct">{b.probability}% assumed collected (heuristic)</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+const KIND_PRESENT = {
+  draft:      { label: "Send a follow-up", cls: "t-ok" },
+  hold:       { label: "Wait",             cls: "t-warn" },
+  pause:      { label: "Pause chasing",    cls: "t-crit" },
+  stop:       { label: "Stop chasing",     cls: "t-crit" },
+  human:      { label: "Needs your call",  cls: "t-hot" },
+  none:       { label: "Nothing to do",    cls: "t-ok" },
+};
+
+function FollowUp({ m }) {
+  const [events, setEvents] = useState([]);
+  const [decision, setDecision] = useState(null);
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [payAmount, setPayAmount] = useState(String(m.amount || ""));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const decide = useCallback(async (nextEvents) => {
+    setBusy(true); setErr("");
+    const today = new Date();
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const due = new Date(today.getTime() - (Number(m.days_overdue) || 0) * 86400000);
+    try {
+      const res = await fetch(API + "/api/next-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          number: (m.invoice_no || m.customer || "invoice").slice(0, 60),
+          amount: Number(m.amount) || 1,
+          due: iso(due),
+          events: nextEvents.map((e) => ({ ...e, day: e.day || iso(today) })),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.detail || "The follow-up helper is unavailable right now.");
+      setDecision(json);
+    } catch (e2) {
+      setErr(e2.message || "The follow-up helper is unavailable right now.");
+    } finally { setBusy(false); }
+  }, [m]);
+
+  const log = (e) => {
+    const next = [...events, e];
+    setEvents(next);
+    decide(next);
+  };
+
+  const present = decision ? KIND_PRESENT[decision.kind] || KIND_PRESENT.none : null;
+  return (
+    <div className="followup">
+      <div className="fu-head">
+        <strong>What happened since?</strong>
+        <span className="hint">A fixed set of rules suggests the next step. This session only — nothing is saved, and nothing is sent for you.</span>
+      </div>
+      <div className="fu-actions">
+        <button type="button" className="btn ghost sm" disabled={busy}
+          onClick={() => log({ type: "sent", tier: m.tier })}>I sent this message</button>
+        <button type="button" className="btn ghost sm" disabled={busy}
+          onClick={() => { setReplyOpen(!replyOpen); setPayOpen(false); }}>They replied</button>
+        <button type="button" className="btn ghost sm" disabled={busy}
+          onClick={() => { setPayOpen(!payOpen); setReplyOpen(false); }}>Payment came in</button>
+      </div>
+      {replyOpen ? (
+        <div className="fu-box">
+          <label htmlFor={"fu-reply-" + m.invoice_no}>Paste their reply</label>
+          <textarea id={"fu-reply-" + m.invoice_no} rows={3} value={replyText}
+            onChange={(e) => setReplyText(e.target.value)}
+            placeholder="e.g. Will pay by Friday, or We never received the goods" />
+          <button type="button" className="btn primary sm" disabled={busy || !replyText.trim()}
+            onClick={() => { log({ type: "reply", text: replyText }); setReplyText(""); setReplyOpen(false); }}>
+            Work out the next step
+          </button>
+        </div>
+      ) : null}
+      {payOpen ? (
+        <div className="fu-box">
+          <label htmlFor={"fu-pay-" + m.invoice_no}>Amount received</label>
+          <input id={"fu-pay-" + m.invoice_no} inputMode="decimal" value={payAmount}
+            onChange={(e) => setPayAmount(e.target.value)} />
+          <button type="button" className="btn primary sm" disabled={busy || !(Number(payAmount) > 0)}
+            onClick={() => { log({ type: "payment", amount: Number(payAmount) }); setPayOpen(false); }}>
+            Record payment
+          </button>
+        </div>
+      ) : null}
+      {err ? <div className="error" role="alert">{err}</div> : null}
+      {decision && present ? (
+        <div className={"fu-decision"}>
+          <span className={"tier " + present.cls}>{present.label}{decision.tier && decision.kind === "draft" ? ": " + decision.tier : ""}</span>
+          <span className="fu-reason">
+            {decision.reason}{decision.until ? " — until " + decision.until : ""}
+          </span>
+        </div>
+      ) : null}
+      {events.length ? (
+        <div className="fu-log">{plural(events.length, "update", "updates")} logged this session.</div>
+      ) : null}
     </div>
   );
 }
@@ -192,6 +294,7 @@ function MessageCard({ m, currency }) {
             {channel === "whatsapp" && wa ? <a className="btn primary sm" href={wa} target="_blank" rel="noreferrer">Send on WhatsApp</a> : null}
             {!m.to_email && !m.to_phone ? <span className="hint">No email or phone saved for this one.</span> : null}
           </div>
+          <FollowUp m={m} />
         </div>
       ) : null}
     </div>
@@ -283,6 +386,11 @@ export default function App() {
   }, [rows, currency, sender, company]);
 
   const rep = result && result.report;
+  const overdueRows = rep ? rep.priority.filter((p) => p.days_overdue > 0) : [];
+  const overdueTotal = overdueRows.reduce((sum, p) => sum + p.amount, 0);
+  const overdueCount = overdueRows.length;
+  const late90Total = overdueRows.filter((p) => p.days_overdue > 90).reduce((sum, p) => sum + p.amount, 0);
+  const oldestDays = rep ? Math.max(0, ...rep.priority.map((p) => p.days_overdue)) : 0;
 
   const csvOut = useMemo(() => {
     if (!rep) return "";
@@ -304,7 +412,7 @@ export default function App() {
   };
 
   const shareText = rep
-    ? "I ran my unpaid bills through Receivables Rescue: " + money(rep.total_outstanding, currency)
+    ? "I ran my unpaid bills through DueRise: " + money(rep.total_outstanding, currency)
       + " outstanding, and " + money(rep.cost_of_waiting_30d, currency)
       + " of it quietly disappears if I do nothing for 30 days. Free, no signup."
     : "";
@@ -315,7 +423,7 @@ export default function App() {
     <div className="page">
       <header className="topbar">
         <div className="wrap bar">
-          <div className="logo"><span className="dot" aria-hidden="true" />Receivables Rescue</div>
+          <div className="logo"><span className="dot" aria-hidden="true" />DueRise</div>
           {rows.length || result ? (
             <button type="button" className="btn ghost sm" onClick={reset}>Start over</button>
           ) : null}
@@ -325,8 +433,8 @@ export default function App() {
       <main className="wrap">
         <div className="intro">
           <h1>Find the money you are already owed.</h1>
-          <p>Add your unpaid bills. See who to chase first, what waiting costs you, and send the
-             reminder in one tap. Nothing is saved, and there is no sign-up.</p>
+          <p>Add your unpaid bills. See who to chase first, what waiting costs you, and get a
+             reminder ready to send. This app saves nothing, and there is no sign-up.</p>
         </div>
 
         <Steps step={step} />
@@ -382,7 +490,7 @@ export default function App() {
             <ReviewTable rows={rows} setRows={setRows} currency={currency} />
 
             <button type="button" className="disclosure" onClick={() => setShowDetails(!showDetails)} aria-expanded={showDetails}>
-              {showDetails ? "−" : "+"} Your details, currency and interest settings
+              {showDetails ? "−" : "+"} Your details and currency
             </button>
             {showDetails ? (
               <div className="details">
@@ -430,14 +538,14 @@ export default function App() {
                 <div className="stat-sub">{plural(rep.invoice_count, "bill", "bills")} &middot; {plural(rep.customer_count, "customer", "customers")}</div>
               </div>
               <div className="stat good">
-                <div className="stat-label">Rough estimate to arrive</div>
-                <div className="stat-value">{money(rep.expected_recoverable, currency)}</div>
-                <div className="stat-sub">{money(rep.at_risk, currency)} is already at risk</div>
+                <div className="stat-label">Past due</div>
+                <div className="stat-value">{money(overdueTotal, currency)}</div>
+                <div className="stat-sub">{plural(overdueCount, "bill", "bills")} past their due date</div>
               </div>
               <div className="stat bad">
-                <div className="stat-label">Estimated loss if you wait 30 more days</div>
-                <div className="stat-value">{money(rep.cost_of_waiting_30d, currency)}</div>
-                <div className="stat-sub">Generic heuristic, not a prediction</div>
+                <div className="stat-label">Over 90 days late</div>
+                <div className="stat-value">{money(late90Total, currency)}</div>
+                <div className="stat-sub">{oldestDays > 0 ? "Oldest bill: " + oldestDays + " days late" : "Nothing overdue yet"}</div>
               </div>
             </section>
 
@@ -466,7 +574,7 @@ export default function App() {
               <h2>Where your money is sitting</h2>
               <Aging buckets={rep.buckets} currency={currency} />
               <button type="button" className="disclosure" onClick={() => setShowAssume(!showAssume)} aria-expanded={showAssume}>
-                {showAssume ? "−" : "+"} Where these percentages come from
+                {showAssume ? "−" : "+"} The collection assumptions behind this view
               </button>
               {showAssume ? (
                 <div className="assume">
@@ -524,10 +632,10 @@ export default function App() {
 
       <footer className="wrap foot">
         <p>
-          Your bills are read to build this page and are never stored, logged or shared. Receivables
-          Rescue is not legal, accounting or debt-collection advice; the collection percentages are a generic aging heuristic, not validated on your customers, and any interest figure is an estimate to check with your accountant.
+          This app processes your bills to build this page and does not save them; nothing you
+          enter is kept for a next visit. DueRise is not legal, accounting or debt-collection advice.
         </p>
       </footer>
     </div>
   );
-}
+    }
