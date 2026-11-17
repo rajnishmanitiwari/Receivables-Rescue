@@ -31,6 +31,52 @@ PROBES = [
  ("invoice is wrong, I already paid", {Label.DISPUTE}),
  ("not paid yet will pay by friday", {Label.PROMISE}),
  ("I did not receive the goods, will pay once delivered", {Label.PROMISE, Label.DISPUTE, Label.UNKNOWN}),
+ # Regression: punctuation/Unicode/apostrophe-less negations must NOT become sticky STOP
+ # (found live 18 Nov 2026: "dont stop..." bypassed the guard). Clear opt-outs preserved.
+ ("dont stop sending me reminders, I will pay Friday", {Label.PROMISE}),
+ ("Dont stop sending reminders", {Label.UNKNOWN}),
+ ("don\u2019t stop sending reminders", {Label.UNKNOWN}),
+ ("DONT STOP SENDING REMINDERS", {Label.UNKNOWN}),
+ ("pls dont stop the reminders", {Label.UNKNOWN}),
+ ("cant stop the reminders, I need them", {Label.UNKNOWN}),
+ ("cannot stop the reminders please", {Label.UNKNOWN}),
+ ("I can not stop you from sending", {Label.UNKNOWN}),
+ ("I wont opt out, keep sending", {Label.UNKNOWN}),
+ ("I won\u2019t opt out", {Label.UNKNOWN}),
+ ("I wouldnt opt out of these", {Label.UNKNOWN}),
+ ("dont stop emailing me, the amount is wrong", {Label.DISPUTE}),
+ ("dont contact us again", {Label.DONT_CONTACT}),
+ ("don\u2019t contact us again", {Label.DONT_CONTACT}),
+]
+
+# Reviewer's supplemental probes (18 Nov 2026), pinned verbatim: apostrophe-less,
+# curly-apostrophe, uppercase and cant/cannot negations, plus clear opt-out controls.
+SUPPLEMENT_NOT_OPTOUT = [
+ "dont stop sending reminders",
+ "pls dont stop sending",
+ "don\u2019t stop sending reminders",
+ "cant stop sending reminders now",
+ "cannot stop sending reminders",
+ "DON'T STOP SENDING REMINDERS",
+ "Dont Stop Sending",
+ "doesnt mean stop sending",
+ "wont opt out",
+ "I won\u2019t opt out",
+ "didnt say stop emailing",
+ "I did not say stop, keep sending",
+ "Never stop sending reminders",
+ "Don\u2019t email me, call me",
+ "dont email me call me",
+ "stop sending reminders to my accountant",
+ "stop sending reminders to the old address",
+]
+SUPPLEMENT_CLEAR_OPTOUT = [
+ "stop sending reminders",
+ "STOP",
+ "Stop sending me emails",
+ "don\u2019t contact us again",
+ "dont contact me again",
+ "please unsubscribe me",
 ]
 
 D = date(2026, 11, 18)
@@ -38,6 +84,16 @@ INV = Invoice("X", 1000.0, D - timedelta(days=20))
 
 
 class T(unittest.TestCase):
+    def test_supplement_not_optout(self):
+        for text in SUPPLEMENT_NOT_OPTOUT:
+            self.assertNotEqual(classify_reply(text), Label.DONT_CONTACT, text)
+            self.assertNotIn("optout", reply_flags(text), text)
+
+    def test_supplement_clear_optout(self):
+        for text in SUPPLEMENT_CLEAR_OPTOUT:
+            self.assertEqual(classify_reply(text), Label.DONT_CONTACT, text)
+            self.assertIn("optout", reply_flags(text), text)
+
     def test_reviewer_probes(self):
         bad = [(t, classify_reply(t), sorted(o.name for o in ok))
                for t, ok in PROBES if classify_reply(t) not in ok]

@@ -43,8 +43,15 @@ class Invoice:
 class Action:
     kind: Kind; reason: str; tier: str | None = None; until: date | None = None
 
+_APOS = re.compile(r"[\u2019\u2018\u0060\u00b4\u2032\u02bc]")
+def _norm(text: str) -> str:
+    """Shared normalization for classifier AND flags: lowercase, unify curly/Unicode
+    apostrophes to straight, then drop apostrophes so 'dont', "don't" and curly
+    variants all hit the same guards. Case folding covers uppercase forms."""
+    return _APOS.sub("'", text.lower()).replace("'", "")
+
 _RE_DISPUTE = r"\b(disput\w*|incorrect|wrong amount|not (our|my) invoice|never received (the )?(goods|service)|not delivered|overcharged|(invoice|bill|amount|charge) is wrong)\b"
-_RE_OPTOUT = r"\b(stop (emailing|contacting|sending)|do not (contact|email)|don't (email|contact)|unsubscribe|remove me|opt( me)?[ -]?out)\b|^\s*stop[.!\s]*$"
+_RE_OPTOUT = r"\b(stop (emailing|contacting|sending)|do not (contact|email)|dont (email|contact)|unsubscribe|remove me|opt( me)?[ -]?out)\b|^\s*stop[.!\s]*$"
 _PATTERNS = [
     (Label.DONT_CONTACT, _RE_OPTOUT),
     (Label.DISPUTE, _RE_DISPUTE),
@@ -55,19 +62,20 @@ _PATTERNS = [
 
 # Negation guards: a negated phrase must not be taken at face value. A guard that blocks a
 # match drops the reply to UNKNOWN, which sends it to a human - never to a wrong follow-up.
-_NEG_PAID = re.compile(r"\b(did not|didn't|didnt|have not|haven't|havent|has not|hasn't|hasnt|never|not)\b[^.!?;]{0,40}\b(paid|payment (was )?made|payment done)\b")
+_NEG_PAID = re.compile(r"\b(did not|didnt|have not|havent|has not|hasnt|never|not)\b[^.!?;]{0,40}\b(paid|payment (was )?made|payment done)\b")
 _NEG_DISPUTE = re.compile(r"\bno disput\w*\b")
 # Qualified or negated opt-outs are NOT clear opt-outs. "Not opting out", a channel or
 # address change ("don't email, call me"), excluding a third party ("stop contacting my
 # accountant") or one disputed invoice all need a human - never a sticky STOP.
 _OPT_NEGATED = re.compile(
-    r"\b(do not|don't|does not|doesn't|will not|won't|wont|would not|wouldn't|never)\s+"
+    r"\b(do not|dont|does not|doesnt|will not|wont|would not|wouldnt|cannot|can not|cant|never)\s+"
     r"(stop\b|opt(ing)?(\s+me)?[ -]?out)"
-    r"|\bnot\s+(opting?(\s+me)?[ -]?out|asking|saying|telling)\b"
-    r"|\bdoes\s*not\s+mean\s+stop\b|\bdoesn'?t\s+mean\s+stop\b"
+    r"|\b(did not|didnt|does not|doesnt|do not|dont|never|not)\s+"
+    r"(say|said|saying|ask|asked|asking|tell|told|telling|mean|meant|opting?(\s+me)?[ -]?out)\b"
+    r"|\bdoes\s*not\s+mean\s+stop\b|\bdoesnt\s+mean\s+stop\b"
 )
 _OPT_QUALIFIED = re.compile(
-    r"\b(don'?t|do not|stop)\s+(email|mail|contact|message|send)\w*\b[^.!?;]{0,60}?\b("
+    r"\b(dont|do not|stop)\s+(email|mail|contact|message|send)\w*\b[^.!?;]{0,60}?\b("
     r"this (address|e?mail|number|invoice|bill)|that (address|e?mail|invoice|bill)|"
     r"(same|old|corrected) (invoice|bill|address|e?mail|copy)|"
     r"my other|work e?mail|personal e?mail|"
@@ -80,7 +88,7 @@ def reply_flags(text: str) -> frozenset:
     """Independent of the single returned label: a reply can carry BOTH a clear opt-out
     and a dispute. The planner uses these flags so dual-intent replies keep the
     no-contact sticky AND get a human for the dispute."""
-    t = text.lower()
+    t = _norm(text)
     out = set()
     if re.search(_RE_OPTOUT, t) and not (_OPT_NEGATED.search(t) or _OPT_QUALIFIED.search(t)):
         out.add("optout")
@@ -90,7 +98,7 @@ def reply_flags(text: str) -> frozenset:
 
 def classify_reply(text: str) -> Label:
     """Keyword baseline with negation guards. Order matters: disputes and opt-outs win over 'paid'."""
-    t = text.lower()
+    t = _norm(text)
     for label, pat in _PATTERNS:
         if re.search(pat, t):
             if label == Label.PAID and _NEG_PAID.search(t):
