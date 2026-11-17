@@ -1,14 +1,15 @@
-# Receivables Rescue
+# DueRise (formerly Receivables Rescue)
 
-**Find the money your business is already owed.**
+**Find the money your business is already owed.** Live at https://duerise.vercel.app (the older receivables-rescue.vercel.app address still works; the repo keeps its original name).
 
-Add your unpaid bills — as a photo, a PDF, a spreadsheet, or typed in. In one pass you get:
+Add your unpaid bills — as a PDF, a spreadsheet, or typed in. In one pass you get:
 
 - how much is realistically collectable vs. already lost,
 - **how much you lose by waiting 30 more days** — the number that makes people act,
 - a ranked chase list, ordered by cost of waiting rather than by age,
-- for Indian MSMEs: the **statutory late-payment interest** the MSMED Act entitles you to,
-- ready-to-send follow-ups (WhatsApp + email) that escalate correctly by tier.
+- ready-to-send follow-ups (WhatsApp + email) that escalate correctly by tier,
+- a rule-based helper that suggests the **next step per invoice** from what has
+  happened (replies, payments, sends). It never sends anything.
 
 No signup. No invoice data is stored.
 
@@ -26,9 +27,10 @@ Built for a small-business owner who is not technical, on a phone, in a hurry.
    "receivables ageing" or "DSO".
 5. **It works with no API keys.** AI is an upgrade, never a dependency.
 
-Type: Source Serif 4 headings, IBM Plex Sans body — both bundled, not fetched
-from Google, so the app renders correctly on networks that block font CDNs.
-Palette: `#ffffff` / `#22c55e` / `#18181b` / `#71717a`.
+Type: Instrument Serif headings, Manrope body — both bundled as woff2 in the
+repo, not fetched from a CDN, so the app renders correctly on networks that
+block font CDNs. Palette: warm off-white `#fffdf8` / green `#16a34a` /
+ink `#1c1917` / muted `#7d7469`.
 
 ## Stack
 
@@ -48,7 +50,7 @@ Frontend reads `process.env.REACT_APP_BACKEND_URL`.
   style terms, `Bill To` / `Buyer` blocks, GSTIN, email and phone.
 - **CSV / TSV / pasted rows** — flexible header matching, no fixed column order.
 - **Every calculation** — ageing, recovery curve, cost of waiting, concentration
-  risk, MSMED interest.
+  risk.
 - **Every follow-up message** — built from templates, tiered by how late the bill is.
 
 ## What the optional AI key adds
@@ -89,12 +91,13 @@ npm install && npm start
 ## Tests
 
 ```bash
-cd backend && python test_engine.py
+cd backend && python -m pytest -q    # 48 tests
 ```
 
 Covers CSV/TSV/semicolon parsing, headerless positional fallback, Indian and US
 number and date formats, missing dates, bad rows, recovery-curve monotonicity,
-customer concentration, and message tier assignment.
+customer concentration, message tier assignment, the follow-up planner, its reply
+classifier (with a pinned hard-case set), the next-action API, and honest defaults.
 
 Verified: `CI=true npx react-scripts build` compiles with zero warnings; the full
 journey (PDF upload → review → analysis → message) runs in a real browser with no
@@ -108,6 +111,7 @@ console errors and no horizontal overflow at 390px.
 | `GET /api/stats` | anonymous aggregate run count |
 | `POST /api/extract` | multipart upload → rows for review |
 | `POST /api/analyse` | rows as CSV text → report + messages |
+| `POST /api/next-action` | rule-based next-step suggestion per invoice (prototype; sends nothing) |
 
 ## How the numbers work
 
@@ -125,27 +129,18 @@ This surfaces mid-age bills sitting just above the 90-day collectability cliff,
 which is where money actually leaks — not the oldest bills, which are largely
 already lost. Bills that are not yet due always rank below ones that are.
 
-**MSMED statutory interest** (`bank_rate` set, INR only). Section 15 of the
-MSMED Act, 2006 caps the agreed credit period at 45 days; Section 16 entitles a
-registered micro or small enterprise to compound interest with monthly rests at
-three times the RBI Bank Rate:
-
-```
-interest = amount x ( (1 + 3r/1200) ^ (days_late / 30.4375) - 1 )
-```
-
-The Bank Rate is a user-editable field, defaulting to 5.50% (published effective
-5 August 2026). It moves — the UI tells the user to check it. The clause is only
-added to a message when the bill is more than 45 days late and the interest
-exceeds 100 units, because quoting a statute over a three-day delay reads as
-bluster rather than leverage.
+**MSMED statutory interest — currently disabled.** An experimental MSMED Act
+late-payment interest estimate exists in the codebase but is switched off
+(`ENABLE_MSMED_INTEREST` unset) until its applicability and formula are verified.
+The UI shows no interest figures while it is off, and no interest clause is added
+to messages.
 
 ## Limitations
 
 Not legal, accounting or debt-collection advice. Recovery percentages are
-industry ageing benchmarks, not a prediction about specific customers. The
-statutory interest figure is an estimate for planning and applies only to
-Udyam-registered enterprises — confirm with a CA before claiming it.
+industry ageing benchmarks, not a prediction about specific customers. The reply
+classifier behind the follow-up helper is a keyword baseline (English only) and
+can misread replies; ambiguous replies are routed to a human rather than chased.
 
 ## Security
 
