@@ -43,18 +43,27 @@ class Action:
     kind: Kind; reason: str; tier: str | None = None; until: date | None = None
 
 _PATTERNS = [
-    (Label.DONT_CONTACT, r"\b(stop (emailing|contacting)|do not contact|unsubscribe|remove me)\b"),
-    (Label.DISPUTE, r"\b(disput\w*|incorrect|wrong amount|not (our|my) invoice|never received (the )?(goods|service)|not delivered|overcharged)\b"),
-    (Label.PAID, r"\b(already paid|have paid|has been paid|payment (was )?made|paid on)\b"),
-    (Label.PROMISE, r"\b(will pay|will transfer|pay (you )?(by|on)|payment (will|is) (be )?(made|scheduled)|processing (the )?payment)\b"),
+    (Label.DONT_CONTACT, r"\b(stop (emailing|contacting)|do not contact|unsubscribe|remove me)\b|^\s*stop[.!\s]*$"),
+    (Label.DISPUTE, r"\b(disput\w*|incorrect|wrong amount|not (our|my) invoice|never received (the )?(goods|service)|not delivered|overcharged|(invoice|bill|amount|charge) is wrong)\b"),
+    (Label.PAID, r"\b(already paid|have paid|has been paid|payment (was )?made|payment (is )?done|paid on|paid (this|it|that|the invoice|the bill|invoice))\b"),
+    (Label.PROMISE, r"\b(will pay|will transfer|pay (you )?(by|on)|paying (today|tomorrow|tonight)|payment (will|is) (be )?(made|scheduled)|processing (the )?payment|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|month end|eom))\b"),
     (Label.PARTIAL, r"\b(partial payment|part payment|paid half|paid part)\b"),
 ]
 
+# Negation guards: a negated phrase must not be taken at face value. A guard that blocks a
+# match drops the reply to UNKNOWN, which sends it to a human - never to a wrong follow-up.
+_NEG_PAID = re.compile(r"\b(did not|didn't|didnt|have not|haven't|havent|has not|hasn't|hasnt|never|not)\b[^.!?;]{0,40}\b(paid|payment (was )?made|payment done)\b")
+_NEG_DISPUTE = re.compile(r"\bno disput\w*\b")
+
 def classify_reply(text: str) -> Label:
-    """Keyword baseline. Order matters: disputes and opt-outs win over 'paid'."""
+    """Keyword baseline with negation guards. Order matters: disputes and opt-outs win over 'paid'."""
     t = text.lower()
     for label, pat in _PATTERNS:
         if re.search(pat, t):
+            if label == Label.PAID and _NEG_PAID.search(t):
+                continue
+            if label == Label.DISPUTE and _NEG_DISPUTE.search(t):
+                continue
             return label
     return Label.UNKNOWN
 
