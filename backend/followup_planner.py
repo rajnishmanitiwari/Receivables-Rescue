@@ -107,8 +107,67 @@ def classify_reply(text: str) -> Label:
                 continue
             if label == Label.DONT_CONTACT and (_OPT_NEGATED.search(t) or _OPT_QUALIFIED.search(t)):
                 continue
+            if label == Label.PROMISE and _NEG_PROMISE.search(t):
+                continue
             return label
     return Label.UNKNOWN
+
+# A suggestion is never applied to the plan: it is shown to the user with its
+# provenance, and only a confirmed/edited explicit promise_date reaches the planner.
+# Negated, conditional, retracted, reported-speech, multi-date and ambiguous
+# (same-weekday, "next X", numeric) replies yield None and stay human-routed.
+_NEG_PROMISE = re.compile(
+    r"\b(cant|cannot|can not|will not|wont|would not|wouldnt|do not|dont|never)\s+"
+    r"(pay|paying|transfer|be paying)\b|\bnot\s+paying\b")
+# Hedged, partial or already-settled phrasing is not a date promise: ability
+# (can/could/should), intention (try/hopefully), approximation (around/before),
+# partial amounts (half/part/balance/rest) and settled claims (paid) stay human.
+_SUG_HEDGE = re.compile(
+    r"\b(before|around|approximately|roughly|hopefully|hope|try|trying|"
+    r"can|could|should|might|may|half|part|partial|partially|balance|rest)\b")
+_SUG_PAID = re.compile(r"\bpaid\b")
+_SUG_PAID_NEG = re.compile(r"\b(not|never|havent|hasnt|didnt|did not|yet)\s+(?:been\s+)?paid\b|\bpaid\s+yet\b")
+_SUG_VETO = re.compile(
+    r"\b(if|unless|provided|providing|once|as soon as|after|otherwise|until|when)\b"      # conditional
+    r"|\b(but|however|actually|no wait|maybe|sorry|unfortunately)\b"                        # retracted/hedged
+    r"|\b(he|she|they|accounts?|client|customer|team|boss|manager)s?\s+said\b|\bsaid\s+(he|she|they)\b|\btold\s+(me|us)\b"  # reported speech
+    r"|\bnext\s+(week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b"   # ambiguous "next X"
+    r"|\b\d+(st|nd|rd|th)?\b|\b(in|within)\s+\d+\s+(days?|weeks?|months?)\b")         # numeric dates / relative offsets
+_SUG_WD = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+           "friday": 4, "saturday": 5, "sunday": 6}   # full names only: abbreviations anchor on names
+_SUG_FORMS = [
+    ("day_after_tomorrow", re.compile(r"\bday after tomorrow\b"), lambda r: r + timedelta(days=2)),
+    ("tomorrow",           re.compile(r"\btomorrow\b"),           lambda r: r + timedelta(days=1)),
+    ("today",              re.compile(r"\b(tonight|today|this evening|this afternoon|end of day|eod)\b"), lambda r: r),
+    ("month_end",          re.compile(r"\b(month end|end of the month|eom)\b"),
+     lambda r: date(r.year + (r.month == 12), r.month % 12 + 1, 1) - timedelta(days=1)),
+    ("weekday",            re.compile(r"\b((?:by|on|this)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b"), None),
+]
+
+def suggest_promise_date(text: str, reply_day: date) -> dict | None:
+    """Suggest a promised payment date for the user to confirm or edit. Returns
+    {date, phrase, reply_day, rule} with provenance, or None (stay human-routed).
+    Never applied to the plan by the planner or the API."""
+    t = _norm(text)
+    if _NEG_PROMISE.search(t) or _SUG_VETO.search(t) or _SUG_HEDGE.search(t):
+        return None
+    if _SUG_PAID.search(t) and not _SUG_PAID_NEG.search(t):
+        return None  # "paid" as a settled claim; "not paid yet" is not one
+    found = []
+    for rule, pat, calc in _SUG_FORMS:
+        for m in pat.finditer(t):
+            if rule == "weekday":
+                delta = (_SUG_WD[m.group(2)] - reply_day.weekday()) % 7
+                if delta == 0:
+                    continue  # same weekday as the reply day: today or next week is ambiguous
+                found.append((rule, m.group(0), reply_day + timedelta(days=delta)))
+            else:
+                found.append((rule, m.group(0), calc(reply_day)))
+    if len(found) != 1:
+        return None  # zero forms, or multi-date: a human reads these
+    rule, phrase, d = found[0]
+    return {"date": d.isoformat(), "phrase": phrase,
+            "reply_day": reply_day.isoformat(), "rule": rule}
 
 def tier_for(days_overdue: int) -> str:
     for name, lo, hi in TIERS:

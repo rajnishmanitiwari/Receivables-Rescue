@@ -304,3 +304,8 @@ table.data tbody tr:hover{background:var(--wash)}
   background:var(--wash);border:1px solid var(--line);border-radius:var(--radius-sm);padding:11px 13px}
 .fu-reason{font-size:14px;color:var(--ink-2)}
 .fu-log{margin-top:8px;color:var(--muted);font-size:12.5px}
+.fu-suggest{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding:10px 12px;
+  border:1px solid var(--line-2);border-radius:var(--radius-sm);background:var(--paper-2,#faf8f5)}
+.fu-suggest-text{font-size:13px;color:var(--muted);line-height:1.45}
+.fu-suggest-text strong{color:var(--ink)}
+.fu-suggest-actions{display:flex;gap:8px;flex-wrap:wrap}

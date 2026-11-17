@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { applyPromiseDateToEvents, clearPromiseDateFromEvents, buildNextActionEvents, localIso, isOutlierDate } from "./promiseDate";
 import { safeEmailAddress, buildMailto } from "./mailto";
 import SAMPLE_ROWS from "./sample";
 
@@ -169,12 +170,15 @@ const KIND_PRESENT = {
   none:       { label: "Nothing to do",    cls: "t-ok" },
 };
 
-function FollowUp({ m }) {
+export function FollowUp({ m }) {
   const [events, setEvents] = useState([]);
   const [decision, setDecision] = useState(null);
   const [replyOpen, setReplyOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [replyText, setReplyText] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editingDate, setEditingDate] = useState(false);
+  const [dismissedSug, setDismissedSug] = useState("");
   const [payAmount, setPayAmount] = useState(String(m.amount || ""));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -182,8 +186,9 @@ function FollowUp({ m }) {
   const decide = useCallback(async (nextEvents) => {
     setBusy(true); setErr("");
     const today = new Date();
-    const iso = (d) => d.toISOString().slice(0, 10);
-    const due = new Date(today.getTime() - (Number(m.days_overdue) || 0) * 86400000);
+    const iso = localIso;
+    const due = new Date(today);
+    due.setDate(due.getDate() - (Number(m.days_overdue) || 0));  // calendar days: DST-safe
     try {
       const res = await fetch(API + "/api/next-action", {
         method: "POST",
@@ -192,7 +197,8 @@ function FollowUp({ m }) {
           number: (m.invoice_no || m.customer || "invoice").slice(0, 60),
           amount: Number(m.amount) || 1,
           due: iso(due),
-          events: nextEvents.map((e) => ({ ...e, day: e.day || iso(today) })),
+          today: iso(today),
+          events: buildNextActionEvents(nextEvents, iso(today)),
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -203,11 +209,53 @@ function FollowUp({ m }) {
     } finally { setBusy(false); }
   }, [m]);
 
+  const nextEventId = useRef(1);
+  // The day a reply was actually received, editable: pasting a reply today
+  // does not mean the customer wrote it today. Defaults to local today.
+  const [replyDay, setReplyDay] = useState(() => localIso(new Date()));
   const log = (e) => {
-    const next = [...events, e];
+    const day = e.type === "reply" ? replyDay : localIso(new Date());
+    if (day > localIso(new Date())) { setErr("The reply date cannot be in the future."); return; }
+    const next = [...events, { ...e, id: nextEventId.current++, day }];
     setEvents(next);
     decide(next);
   };
+
+  // A suggested promise date is only ever advisory: nothing changes in the plan
+  // until the user confirms or edits it. Confirm/change sets an explicit
+  // promise_date on the specific reply it belongs to; Remove strips it again.
+  // A newer reply never inherits or loses the date by position: the confirmed
+  // date stays on the event it was confirmed on, and at most one reply carries
+  // a date at any time.
+  const [editTarget, setEditTarget] = useState(null);
+  // Far-future dates get one explicit extra confirmation; never a silent cap.
+  const [pendingOutlier, setPendingOutlier] = useState(null);
+  const applyPromiseDate = (dstr, targetId, skipOutlierCheck) => {
+    const outlierDays = skipOutlierCheck ? 0 : isOutlierDate(dstr, localIso(new Date()));
+    if (outlierDays) { setPendingOutlier({ dstr, targetId, days: outlierDays }); return; }
+    const next = applyPromiseDateToEvents(events, dstr, targetId);
+    setEvents(next); decide(next); setEditingDate(false); setEditTarget(null); setPendingOutlier(null);
+  };
+  const clearPromiseDate = (targetId) => {
+    const next = clearPromiseDateFromEvents(events, targetId);
+    setEvents(next); decide(next);
+  };
+
+  const sug = decision && decision.suggested_promise_date ? decision.suggested_promise_date : null;
+  const sugKey = sug ? sug.date + "|" + sug.phrase + "|" + sug.reply_day : "";
+  const todayIso = localIso(new Date());
+  // The server echoes which reply it read (reply_index into the events we sent).
+  // Confirm onto that exact event only when it still matches the suggestion's
+  // reply_day and phrase; any mismatch means no confirmation, never a guess.
+  const sugReply = (() => {
+    if (!sug || !Number.isInteger(sug.reply_index)) return null;
+    const ev = events[sug.reply_index];
+    if (!ev || ev.type !== "reply") return null;
+    if ((ev.day || todayIso) !== sug.reply_day) return null;
+    if (!ev.text || !ev.text.toLowerCase().includes(String(sug.phrase || "").toLowerCase())) return null;
+    return ev;
+  })();
+  const promisedReply = [...events].reverse().find((e) => e.type === "reply" && e.promise_date);
 
   const present = decision ? KIND_PRESENT[decision.kind] || KIND_PRESENT.none : null;
   return (
@@ -230,6 +278,10 @@ function FollowUp({ m }) {
           <textarea id={"fu-reply-" + m.invoice_no} rows={3} value={replyText}
             onChange={(e) => setReplyText(e.target.value)}
             placeholder="e.g. Will pay by Friday, or We never received the goods" />
+          <label htmlFor={"fu-rday-" + m.invoice_no}>Reply received on</label>
+          <input id={"fu-rday-" + m.invoice_no} type="date" value={replyDay}
+            max={localIso(new Date())}
+            onChange={(e) => setReplyDay(e.target.value)} />
           <button type="button" className="btn primary sm" disabled={busy || !replyText.trim()}
             onClick={() => { log({ type: "reply", text: replyText }); setReplyText(""); setReplyOpen(false); }}>
             Work out the next step
@@ -253,6 +305,63 @@ function FollowUp({ m }) {
           <span className={"tier " + present.cls}>{present.label}{decision.tier && decision.kind === "draft" ? ": " + decision.tier : ""}</span>
           <span className="fu-reason">
             {decision.reason}{decision.until ? " — until " + decision.until : ""}
+          </span>
+        </div>
+      ) : null}
+      {sug && sugReply && dismissedSug !== sugKey ? (
+        <div className="fu-suggest">
+          <span className="fu-suggest-text">
+            We read “{sug.phrase}” as <strong>{sug.date}</strong>, assuming the reply was
+            received {sug.reply_day} (the date you logged). Nothing changes until you
+            confirm — you can also pick another date.
+          </span>
+          <span className="fu-suggest-actions">
+            <button type="button" className="btn primary sm" disabled={busy || !sugReply}
+              onClick={() => applyPromiseDate(sug.date, sugReply && sugReply.id)}>Use {sug.date}</button>
+            <button type="button" className="btn ghost sm" disabled={busy || !sugReply}
+              onClick={() => { setEditingDate(true); setEditDate(sug.date); setEditTarget(sugReply && sugReply.id); }}>Pick another date</button>
+            <button type="button" className="btn ghost sm" disabled={busy}
+              onClick={() => { setDismissedSug(sugKey); setEditingDate(false); }}>Dismiss</button>
+          </span>
+        </div>
+      ) : null}
+      {!sug && decision && decision.kind === "hold" && promisedReply ? (
+        <div className="fu-suggest">
+          <span className="fu-suggest-text">
+            Promised date <strong>{promisedReply.promise_date}</strong> is in use for this plan.
+          </span>
+          <span className="fu-suggest-actions">
+            <button type="button" className="btn ghost sm" disabled={busy}
+              onClick={() => { setEditingDate(true); setEditDate(promisedReply.promise_date); setEditTarget(promisedReply.id); }}>Change</button>
+            <button type="button" className="btn ghost sm" disabled={busy}
+              onClick={() => clearPromiseDate(promisedReply.id)}>Remove</button>
+          </span>
+        </div>
+      ) : null}
+      {editingDate ? (
+        <div className="fu-box">
+          <label htmlFor={"fu-pdate-" + m.invoice_no}>Promised payment date</label>
+          <input id={"fu-pdate-" + m.invoice_no} type="date" value={editDate}
+            onChange={(e) => setEditDate(e.target.value)} />
+          <span className="fu-suggest-actions">
+            <button type="button" className="btn primary sm" disabled={busy || !editDate}
+              onClick={() => applyPromiseDate(editDate, editTarget)}>Set date</button>
+            <button type="button" className="btn ghost sm" disabled={busy}
+              onClick={() => { setEditingDate(false); setEditTarget(null); }}>Cancel</button>
+          </span>
+        </div>
+      ) : null}
+      {pendingOutlier ? (
+        <div className="fu-box">
+          <span className="fu-suggest-text">
+            That puts follow-ups on hold for <strong>{pendingOutlier.days} days</strong>, until{" "}
+            <strong>{pendingOutlier.dstr}</strong>. Use this date?
+          </span>
+          <span className="fu-suggest-actions">
+            <button type="button" className="btn primary sm" disabled={busy}
+              onClick={() => applyPromiseDate(pendingOutlier.dstr, pendingOutlier.targetId, true)}>Use {pendingOutlier.dstr}</button>
+            <button type="button" className="btn ghost sm" disabled={busy}
+              onClick={() => setPendingOutlier(null)}>Cancel</button>
           </span>
         </div>
       ) : null}

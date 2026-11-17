@@ -301,9 +301,26 @@ async def next_action(req: PlanRequest):
                 flags = frozenset({"dispute"})
         evs.append(fp.Event(e.day, e.type, label, e.promise_date, e.amount, e.tier, flags))
     inv = fp.Invoice(req.number, req.amount, req.due, req.status)
-    a = fp.next_action(inv, evs, req.today or date.today())
-    return {"kind": a.kind.value, "reason": a.reason, "tier": a.tier,
-            "until": a.until.isoformat() if a.until else None, "prototype": True}
+    today = req.today or date.today()
+    a = fp.next_action(inv, evs, today)
+    out = {"kind": a.kind.value, "reason": a.reason, "tier": a.tier,
+           "until": a.until.isoformat() if a.until else None, "prototype": True}
+    # Advisory only: when the plan is blocked on a date-less promise, suggest a date
+    # with provenance for the user to confirm or edit. Never applied to the plan.
+    # The source reply is the planner's own eligible target: the temporally latest
+    # textual reply dated on or before today (stable order breaks ties), echoed as
+    # reply_index so the caller confirms onto the same event instead of re-deriving.
+    if a.kind == fp.Kind.HUMAN and a.reason == "promise without a date":
+        elig = [(i, e) for i, e in enumerate(req.events)
+                if e.type == "reply" and e.day <= today]
+        if elig:
+            idx, src_reply = max(elig, key=lambda t: (t[1].day, t[0]))
+            if src_reply.text and fp.classify_reply(src_reply.text) == fp.Label.PROMISE:
+                s = fp.suggest_promise_date(src_reply.text, src_reply.day)
+                if s:
+                    s["reply_index"] = idx
+                    out["suggested_promise_date"] = s
+    return out
 
 
 app.include_router(api)
