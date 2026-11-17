@@ -21,10 +21,8 @@ HARD = [
  ("Not paid yet, paying tomorrow", L.PROMISE), ("we paid this on 12 Oct via NEFT", L.PAID), ("payment done", L.PAID),
  ("The invoice is wrong", L.DISPUTE), ("We will transfer the money soon", L.PROMISE), ("No dispute, just a delay", L.UNKNOWN), ("stop", L.DONT_CONTACT),
 ]
-KNOWN_MISSES = {
- "We have not already paid, will do by Friday", "I did not say I have paid", "Not paid yet, paying tomorrow",
- "we paid this on 12 Oct via NEFT", "payment done", "The invoice is wrong", "No dispute, just a delay", "stop",
-}
+KNOWN_MISSES = set()  # 15 of 15 correct after negation guards and pattern additions (18 Nov 2026).
+# Was 7 of 15 on 14 Nov. The earlier misses stay in HARD above as regression cases.
 D = date(2026, 11, 14)
 INV = Invoice("X", 1000.0, D - timedelta(days=20))
 
@@ -34,7 +32,7 @@ class T(unittest.TestCase):
         self.assertEqual(bad, [])
     def test_hard_set_known_misses_are_pinned(self):
         misses = {t for t, e in HARD if classify_reply(t) != e}
-        self.assertEqual(misses, KNOWN_MISSES)      # 7 of 15 correct; 8 misses
+        self.assertEqual(misses, KNOWN_MISSES)      # pinned: any regression names itself here
     def test_no_hard_case_leads_to_a_follow_up_draft(self):
         # A single latest reply that is dispute/opt-out/paid-claim must never produce a draft, even when misclassified.
         for t, truth in HARD:
