@@ -1,13 +1,13 @@
 # DueRise
 
-> DueRise (formerly Receivables Rescue) turns unpaid invoices into a clear chase list. Drop in your bills - a PDF or a spreadsheet - and get back exactly who to chase first, what waiting is costing you, and a reminder ready to send. Free. No signup, no login, nothing stored.
+> DueRise (formerly Receivables Rescue) turns unpaid invoices into a clear chase list. Drop in your bills - a PDF or a spreadsheet - and get back exactly who to chase first, how late each one is, and a reminder ready to send. Free. No signup, no login, nothing stored.
 
 ## The one-line pitch
 DueRise doesn't tell a business that it has a cash-flow problem. It tells the business exactly where to act, in under a minute, for free.
 
 ## What it does today
 - Reads unpaid bills from a PDF with a text layer, a spreadsheet, or pasted text - nothing is analyzed until the user confirms what was read. Reading photos of paper invoices needs the optional AI reader, which is not enabled in the current deployment
-- Ranks customers by expected recoverable value lost per day of waiting, not simply by amount owed or age, so the business acts on the bill that is bleeding the most money right now, not just the oldest one
+- Ranks bills by urgency - how much is owed and how late each one is, under a standard aging assumption - so the business acts on the bill that needs attention first, not just the oldest one
 - Shows an aging breakdown (not yet due, 0-30, 31-60, 61-90, 91-180+ days) against realistic collection-probability benchmarks, so the business can see money at risk before it becomes money lost
 - Generates ready-to-send chase and final-notice messages, tiered by how late the bill is; the user reviews and sends each one themselves
 - Runs with zero API keys and zero database required; AI-assisted reading of scanned photos is an optional upgrade, never a dependency
@@ -16,12 +16,12 @@ DueRise doesn't tell a business that it has a cash-flow problem. It tells the bu
 Small and medium businesses, freelancers, consultants, and independent creators anywhere in the world who invoice clients and are owed money, but do not have - or do not want - a CRM, an accounting-software login, or a collections agency standing between them and getting paid. This is the single most necessary and lowest-friction thing an unpaid-invoice-holding business can do, and it costs nothing.
 
 ## Why it matters
-Unpaid invoices are the most common and least visible cause of small-business cash-flow failure. Almost every business owner knows some money is outstanding; almost none know which specific bill to chase today, or what it is actually costing them to keep waiting. DueRise answers these, immediately, without asking for a login.
+Unpaid invoices are the most common and least visible cause of small-business cash-flow failure. Almost every business owner knows some money is outstanding; almost none know which specific bill to chase today or how late each one is. DueRise answers these, immediately, without asking for a login.
 
 ## How it works (three steps)
 1. Add bills - drop a photo, PDF, or spreadsheet, paste text, or try the built-in example data
 2. Check what was read - an editable review table, corrected before anything is calculated
-3. See who to chase - a prioritized list, the cost of waiting, an aging breakdown, and a message ready to send
+3. See who to chase - a prioritized list, an aging breakdown, and a message ready to send
 
 ## Key facts for accurate representation
 - Free, with no signup, no login, and no paywall

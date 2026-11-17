@@ -433,8 +433,8 @@ export default function App() {
       <main className="wrap">
         <div className="intro">
           <h1>Find the money you are already owed.</h1>
-          <p>Add your unpaid bills. See who to chase first, what waiting costs you, and get a
-             reminder ready to send. This app saves nothing, and there is no sign-up.</p>
+          <p>Add your unpaid bills. See who to chase first, how late each one is, and get a
+             reminder ready to send. Nothing is kept between visits, and there is no sign-up.</p>
         </div>
 
         <Steps step={step} />
@@ -592,7 +592,7 @@ export default function App() {
               <div className="card-head row-head">
                 <div>
                   <h2>Chase these first</h2>
-                  <p>{rep.ranking_basis || "Ranked by money lost if you wait another 30 days."} Open any row for a message you can send now.</p>
+                  <p>{rep.ranking_basis || "Ranked by urgency: how much is owed and how late each bill is, under a standard aging assumption."} Open any row for a message you can send now.</p>
                 </div>
                 <div className="head-actions">
                   <button type="button" className="btn ghost sm" onClick={download}>Download list</button>

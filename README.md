@@ -5,8 +5,8 @@
 Add your unpaid bills — as a PDF, a spreadsheet, or typed in. In one pass you get:
 
 - how much is realistically collectable vs. already lost,
-- **how much you lose by waiting 30 more days** — the number that makes people act,
-- a ranked chase list, ordered by cost of waiting rather than by age,
+- how late each bill is, with the oldest and largest surfaced,
+- a ranked chase list, ordered by urgency rather than by age alone,
 - ready-to-send follow-ups (WhatsApp + email) that escalate correctly by tier,
 - a rule-based helper that suggests the **next step per invoice** from what has
   happened (replies, payments, sends). It never sends anything.
