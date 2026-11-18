@@ -208,6 +208,10 @@ class Invoice:
     due_date: date | None = None
     email: str = ""
     phone: str = ""
+    # Where the due date came from: "column" (a named due-date column, which the
+    # caller's own header confirms) or "positional" (an unlabelled column in
+    # headerless input - an assumption, not a confirmed due date). "" when none.
+    date_source: str = ""
     # derived
     days_overdue: int = 0
     bucket: str = ""
@@ -249,9 +253,9 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
     if not body:
         raise ParseError("Found a header row but no invoice rows underneath it.")
 
-    if not header_map:
+    positional_mode = not header_map
+    if positional_mode:
         # Positional fallback: customer, invoice_no, amount, due_date, email, phone
-        warnings.append("No header row detected — read columns as: customer, invoice no, amount, due date.")
         widest = max(len(r) for r in body)
         header_map = {"customer": 0}
         if widest >= 4:
@@ -284,9 +288,17 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
         if amount is None or amount <= 0:
             skipped += 1
             continue
-        due = parse_date(cell(row, "due_date")) or parse_date(cell(row, "invoice_date"))
+        # Only an explicit due-date column sets the due date. An invoice date
+        # is when the bill was issued, never when payment is due; rows without
+        # a confirmed due date stay unscheduled (analyse keeps them neutral).
+        due = parse_date(cell(row, "due_date"))
         if due is None:
             undated += 1
+            date_source = ""
+        elif positional_mode:
+            date_source = "positional"
+        else:
+            date_source = "column"
         customer = cell(row, "customer") or "Unnamed customer"
         invoices.append(
             Invoice(
@@ -296,6 +308,7 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
                 due_date=due,
                 email=cell(row, "email")[:120],
                 phone=cell(row, "phone")[:40],
+                date_source=date_source,
             )
         )
 
@@ -303,10 +316,20 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
         warnings.append(f"Only the first {MAX_INVOICES} rows were analysed.")
     if skipped:
         warnings.append(f"Skipped {skipped} row(s) with no usable amount.")
+    positional_dated = sum(1 for i in invoices if i.date_source == "positional")
+    if positional_dated:
+        warnings.append(
+            f"{positional_dated} row(s) came without a header row, so the due date was "
+            "read from an unlabelled column and is unconfirmed. Those rows are not "
+            "scheduled for chasing. Confirm or fix the dates where you review them, "
+            "or add a header row naming the due date column."
+        )
+    elif positional_mode:
+        warnings.append("No header row detected - read columns as: customer, invoice no, amount, due date.")
     if undated:
         warnings.append(
-            f"{undated} invoice(s) had no readable due date — treated as due today, "
-            "so their real risk is probably higher."
+            f"{undated} invoice(s) had no readable due date. Their lateness is unknown "
+            "and they are not scheduled for chasing. Add due dates to include them."
         )
     if not invoices:
         raise ParseError("No rows had a usable amount. Check the amount column and try again.")
@@ -322,9 +345,21 @@ def analyse(invoices: list[Invoice], today: date | None = None,
     MSMED statutory-interest calculation off entirely (non-India users)."""
     today = today or date.today()
 
+    unconfirmed = [i for i in invoices if i.due_date is None or i.date_source != "column"]
     for inv in invoices:
-        due = inv.due_date or today
-        inv.days_overdue = (today - due).days
+        if inv.due_date is None or inv.date_source != "column":
+            # Unknown or unconfirmed due date: unknown stays unknown. No lateness,
+            # tier, probability or cost of waiting is derived from it, and no chase
+            # draft is built for the row (build_messages skips tier-less rows).
+            inv.days_overdue = None
+            inv.bucket = "No confirmed due date"
+            inv.tier = ""
+            inv.probability = None
+            inv.expected_value = None
+            inv.slip_30d = None
+            inv.statutory_interest = 0.0
+            continue
+        inv.days_overdue = (today - inv.due_date).days
         inv.bucket = bucket_for(inv.days_overdue)
         inv.tier = tier_for(inv.days_overdue)
         inv.probability = recovery_probability(inv.days_overdue)
@@ -339,19 +374,22 @@ def analyse(invoices: list[Invoice], today: date | None = None,
     # Overdue always outranks not-yet-due; within that, rank by the money you
     # lose by waiting another 30 days. That deliberately surfaces mid-age
     # invoices sitting right above the 90-day collectability cliff.
-    ranked = sorted(invoices, key=lambda i: (0 if i.days_overdue > 0 else 1, -i.slip_30d, -i.amount))
+    ranked = sorted(
+        invoices,
+        key=lambda i: (0 if (i.days_overdue or 0) > 0 else 1, -(i.slip_30d or 0.0), -i.amount),
+    )
     for pos, inv in enumerate(ranked, start=1):
         inv.rank = pos
 
     total = round(sum(i.amount for i in invoices), 2)
-    overdue = [i for i in invoices if i.days_overdue > 0]
+    overdue = [i for i in invoices if (i.days_overdue or 0) > 0]
     total_overdue = round(sum(i.amount for i in overdue), 2)
-    expected = round(sum(i.expected_value for i in invoices), 2)
-    cost_of_waiting = round(sum(i.slip_30d for i in invoices), 2)
+    expected = round(sum(i.expected_value or 0.0 for i in invoices), 2)
+    cost_of_waiting = round(sum(i.slip_30d or 0.0 for i in invoices), 2)
 
     buckets = []
     for name, lo, hi in BUCKETS:
-        rows = [i for i in invoices if lo <= i.days_overdue <= hi]
+        rows = [i for i in invoices if i.days_overdue is not None and lo <= i.days_overdue <= hi]
         amt = round(sum(i.amount for i in rows), 2)
         if not rows:
             continue
@@ -364,26 +402,38 @@ def analyse(invoices: list[Invoice], today: date | None = None,
             "probability": round(recovery_probability(mid) * 100),
         })
 
+    if unconfirmed:
+        unconfirmed_amt = round(sum(i.amount for i in unconfirmed), 2)
+        buckets.append({
+            "bucket": "No confirmed due date",
+            "count": len(unconfirmed),
+            "amount": unconfirmed_amt,
+            "share": round(unconfirmed_amt / total * 100, 1) if total else 0.0,
+            "probability": None,
+        })
+
     by_customer: dict[str, dict[str, Any]] = {}
     for inv in invoices:
         c = by_customer.setdefault(inv.customer, {
             "customer": inv.customer, "amount": 0.0, "count": 0,
-            "oldest_days": inv.days_overdue, "slip_30d": 0.0,
+            "oldest_days": inv.days_overdue or 0, "slip_30d": 0.0,
             "email": "", "phone": "",
         })
         c["amount"] = round(c["amount"] + inv.amount, 2)
         c["count"] += 1
-        c["slip_30d"] = round(c["slip_30d"] + inv.slip_30d, 2)
-        c["oldest_days"] = max(c["oldest_days"], inv.days_overdue)
+        c["slip_30d"] = round(c["slip_30d"] + (inv.slip_30d or 0.0), 2)
+        c["oldest_days"] = max(c["oldest_days"], inv.days_overdue or 0)
         c["email"] = c["email"] or inv.email
         c["phone"] = c["phone"] or inv.phone
     customers = sorted(by_customer.values(), key=lambda c: -c["amount"])
     for c in customers:
         c["share"] = round(c["amount"] / total * 100, 1) if total else 0.0
 
+    dated = [i for i in invoices if i.days_overdue is not None]
+    dated_total = sum(i.amount for i in dated)
     weighted_days = (
-        round(sum(i.amount * max(i.days_overdue, 0) for i in invoices) / total, 1)
-        if total else 0.0
+        round(sum(i.amount * max(i.days_overdue, 0) for i in dated) / dated_total, 1)
+        if dated_total else 0.0
     )
     top_share = customers[0]["share"] if customers else 0.0
 
@@ -391,15 +441,21 @@ def analyse(invoices: list[Invoice], today: date | None = None,
     if top_share >= 40:
         risks.append(
             f"{customers[0]['customer']} alone is {top_share}% of everything you are owed. "
-            "One late payer can stop your month."
+            "That is a lot riding on one customer."
         )
-    old_amt = sum(i.amount for i in invoices if i.days_overdue > 90)
+    old_amt = sum(i.amount for i in invoices if (i.days_overdue or 0) > 90)
     if old_amt > 0 and total:
         risks.append(
             f"{round(old_amt / total * 100)}% of your book is past 90 days, where the generic aging "
             "heuristic assumes collection odds fall sharply (not validated on your customers). Chase or decide — do not drift."
         )
-    if not overdue:
+    if unconfirmed:
+        risks.append(
+            f"{len(unconfirmed)} invoice(s) have no confirmed due date. Nothing is known "
+            "about their lateness, no reminders are scheduled for them, and they are left "
+            "out of the recovery estimates. Add due dates to see their real risk."
+        )
+    if not overdue and not unconfirmed:
         risks.append("Nothing is overdue yet. Send the pre-due nudges below and keep it that way.")
     no_contact = sum(1 for i in invoices if not i.email and not i.phone)
     if no_contact:
@@ -431,7 +487,7 @@ def analyse(invoices: list[Invoice], today: date | None = None,
             {
                 **{k: v for k, v in asdict(i).items() if k != "due_date"},
                 "due_date": i.due_date.isoformat() if i.due_date else None,
-                "probability": round(i.probability * 100),
+                "probability": round(i.probability * 100) if i.probability is not None else None,
             }
             for i in ranked
         ],

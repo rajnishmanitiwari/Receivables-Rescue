@@ -36,10 +36,13 @@ def test_no_header_positional():
     text = f"Acme,INV-1,50000,{d(200)}\nBeta,INV-2,20000,{d(5)}\n"
     inv, warn = engine.parse_invoices(text, today=TODAY)
     assert len(inv) == 2
-    assert any("No header" in w for w in warn)
+    assert any("No header" in w or "header" in w for w in warn)
+    # Positional dates are read but marked as assumptions: analyse keeps the
+    # rows neutral (no lateness, tier or cost of waiting) until confirmed.
+    assert all(i.date_source == "positional" for i in inv)
     r = engine.analyse(inv, today=TODAY)
-    slips = [p["slip_30d"] for p in r["priority"]]
-    assert slips == sorted(slips, reverse=True), slips
+    assert all(p["days_overdue"] is None and p["tier"] == "" for p in r["priority"])
+    assert all(p["bucket"] == "No confirmed due date" for p in r["priority"])
 
 
 def test_tsv_and_semicolon_and_us_dates():

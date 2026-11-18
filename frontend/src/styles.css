@@ -179,6 +179,7 @@ table{width:100%;border-collapse:collapse;font-size:14.5px}
 .review-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;
   padding:12px 14px;background:var(--wash);border-top:1px solid var(--line);flex-wrap:wrap}
 .review-total{font-size:14px;color:var(--muted)}
+.assumed{display:block;background:none;border:0;padding:0;margin-top:2px;font-size:11px;color:#b45309;text-align:left;cursor:pointer;text-decoration:underline}
 .review-total strong{color:var(--ink);font-weight:600}
 
 table.data{min-width:520px}
@@ -229,7 +230,7 @@ table.data tbody tr:hover{background:var(--wash)}
 .aging-name{color:var(--muted)}
 .aging-track{background:var(--wash-2);border-radius:5px;height:18px;overflow:hidden}
 .aging-bar{height:100%;border-radius:5px}
-.b-ok{background:#a1a1aa}.b-warn{background:#fbbf24}.b-crit{background:#f87171}
+.b-ok{background:#a1a1aa}.b-warn{background:#fbbf24}.b-crit{background:#f87171}.b-neutral{background:#e4e4e7}
 .aging-amt{text-align:right;font-weight:600}
 .aging-pct{color:var(--muted);font-size:12.5px}
 .assume{margin-top:10px;color:var(--muted);font-size:13.5px}

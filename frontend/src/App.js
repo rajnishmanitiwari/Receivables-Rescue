@@ -28,11 +28,17 @@ function money(n, cur = "INR") {
   return (SYMBOLS[cur] || cur + " ") + v.toLocaleString("en-US");
 }
 
-function rowsToCsv(rows) {
+export function rowsToCsv(rows) {
   const esc = (s) => '"' + String(s == null ? "" : s).replace(/"/g, "'") + '"';
   return "Customer,Invoice No,Amount,Due Date,Email,Phone\n" + rows
     .map((r) => [esc(r.customer), esc(r.invoice_no), Number(r.amount) || 0, esc(r.due_date), esc(r.email), esc(r.phone)].join(","))
     .join("\n");
+}
+
+// An assumed date only becomes real when the user edits or confirms it in the
+// review table; untouched ones are sent blank so those bills stay unscheduled.
+export function stripUnconfirmedDates(rows) {
+  return rows.map((r) => (r.date_assumed ? { ...r, due_date: "" } : r));
 }
 
 /* ------------------------------------------------------------------ */
@@ -104,8 +110,8 @@ function Drop({ onFiles, busy }) {
   );
 }
 
-function ReviewTable({ rows, setRows, currency }) {
-  const update = (i, key, val) => setRows(rows.map((r, n) => (n === i ? { ...r, [key]: val } : r)));
+export function ReviewTable({ rows, setRows, currency }) {
+  const update = (i, key, val) => setRows(rows.map((r, n) => (n === i ? { ...r, [key]: val, ...(key === "due_date" ? { date_assumed: false } : {}) } : r)));
   const remove = (i) => setRows(rows.filter((_, n) => n !== i));
   const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   return (
@@ -124,7 +130,10 @@ function ReviewTable({ rows, setRows, currency }) {
                 <td><input value={r.customer} onChange={(e) => update(i, "customer", e.target.value)} placeholder="Customer name" /></td>
                 <td><input className="w-sm" value={r.invoice_no} onChange={(e) => update(i, "invoice_no", e.target.value)} placeholder="—" /></td>
                 <td><input className="w-sm num" inputMode="decimal" value={r.amount} onChange={(e) => update(i, "amount", e.target.value)} placeholder="0" /></td>
-                <td><input className="w-md" type="date" value={r.due_date || ""} onChange={(e) => update(i, "due_date", e.target.value)} /></td>
+                <td>
+                  <input className="w-md" type="date" value={r.due_date || ""} onChange={(e) => update(i, "due_date", e.target.value)} />
+                  {r.date_assumed ? <button type="button" className="assumed" onClick={() => update(i, "date_assumed", false)}>We estimated this date. Tap to confirm, or fix it.</button> : null}
+                </td>
                 <td><input value={r.email} onChange={(e) => update(i, "email", e.target.value)} placeholder="—" /></td>
                 <td><input className="w-md" value={r.phone} onChange={(e) => update(i, "phone", e.target.value)} placeholder="—" /></td>
                 <td><button type="button" className="x" onClick={() => remove(i)} aria-label={"Remove row " + (i + 1)}>&times;</button></td>
@@ -141,7 +150,7 @@ function ReviewTable({ rows, setRows, currency }) {
   );
 }
 
-function Aging({ buckets, currency }) {
+export function Aging({ buckets, currency }) {
   const max = Math.max(...buckets.map((b) => b.amount), 1);
   return (
     <div className="aging">
@@ -150,7 +159,7 @@ function Aging({ buckets, currency }) {
           <div className="aging-name">{b.bucket}</div>
           <div className="aging-track">
             <div
-              className={"aging-bar " + (b.bucket.indexOf("Not") === 0 ? "b-ok" : b.probability >= 74 ? "b-warn" : "b-crit")}
+              className={"aging-bar " + (b.probability == null ? "b-neutral" : b.bucket.indexOf("Not") === 0 ? "b-ok" : b.probability >= 74 ? "b-warn" : "b-crit")}
               style={{ width: Math.max(2, (b.amount / max) * 100) + "%" }}
             />
           </div>
@@ -187,6 +196,11 @@ export function FollowUp({ m, sender, company, currency, onDecision }) {
   const [err, setErr] = useState("");
 
   const decide = useCallback(async (nextEvents) => {
+    if (m.days_overdue == null) {
+      // No confirmed due date: never invent one (due=today) for the planner.
+      setErr("Confirm this bill's due date before planning the next step.");
+      return;
+    }
     setBusy(true); setErr("");
     const today = new Date();
     const iso = localIso;
@@ -552,16 +566,19 @@ export default function App() {
     if (!clean.length) { setError("Add at least one bill with an amount."); return; }
     setBusy(true); setError(""); setResult(null);
     try {
+      const unconfirmed = clean.filter((r) => r.date_assumed).length;
       const res = await fetch(API + "/api/analyse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          data: rowsToCsv(clean), currency, sender_name: sender, company_name: company,
+          data: rowsToCsv(stripUnconfirmedDates(clean)), currency, sender_name: sender, company_name: company,
           bank_rate: null,
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.detail || "Something went wrong reading those rows.");
+      if (unconfirmed) json.warnings = [...(json.warnings || []),
+        unconfirmed + " assumed due date(s) were not confirmed, so those bills stay unscheduled. Confirm or enter their dates to chase them."];
       setResult(json);
     } catch (err) {
       setError(err.message || "Something went wrong. Try again.");
@@ -573,6 +590,7 @@ export default function App() {
   const overdueTotal = overdueRows.reduce((sum, p) => sum + p.amount, 0);
   const overdueCount = overdueRows.length;
   const late90Total = overdueRows.filter((p) => p.days_overdue > 90).reduce((sum, p) => sum + p.amount, 0);
+  const unknownDates = rep ? rep.priority.filter((p) => p.days_overdue == null).length : 0;
   const oldestDays = rep ? Math.max(0, ...rep.priority.map((p) => p.days_overdue)) : 0;
 
   const csvOut = useMemo(() => {
@@ -580,7 +598,7 @@ export default function App() {
     const head = "Rank,Customer,Invoice,Amount,Due date,Days late,Bucket,Chance of collection %,Cost of waiting 30d,Statutory interest,Action\n";
     return head + rep.priority.map((p) => [
       p.rank, '"' + String(p.customer).replace(/"/g, "'") + '"', '"' + String(p.invoice_no || "").replace(/"/g, "'") + '"',
-      p.amount, p.due_date || "", p.days_overdue, '"' + p.bucket + '"', p.probability, p.slip_30d,
+      p.amount, p.due_date || "", p.days_overdue ?? "", '"' + p.bucket + '"', p.probability ?? "", p.slip_30d ?? "",
       p.statutory_interest || 0, p.tier,
     ].join(",")).join("\n");
   }, [rep]);
@@ -723,12 +741,12 @@ export default function App() {
               <div className="stat good">
                 <div className="stat-label">Past due</div>
                 <div className="stat-value">{money(overdueTotal, currency)}</div>
-                <div className="stat-sub">{plural(overdueCount, "bill", "bills")} past their due date</div>
+                <div className="stat-sub">{plural(overdueCount, "bill", "bills")} past their due date{unknownDates ? " · " + plural(unknownDates, "bill", "bills") + " with unknown dates" : ""}</div>
               </div>
               <div className="stat bad">
                 <div className="stat-label">Over 90 days late</div>
                 <div className="stat-value">{money(late90Total, currency)}</div>
-                <div className="stat-sub">{oldestDays > 0 ? "Oldest bill: " + oldestDays + " days late" : "Nothing overdue yet"}</div>
+                <div className="stat-sub">{oldestDays > 0 ? "Oldest bill: " + oldestDays + " days late" : unknownDates ? "Lateness unknown for " + plural(unknownDates, "bill", "bills") : "Nothing overdue yet"}</div>
               </div>
             </section>
 

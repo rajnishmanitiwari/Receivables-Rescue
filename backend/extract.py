@@ -70,7 +70,8 @@ def _first_date(text: str) -> date | None:
 def parse_invoice_text(text: str) -> dict[str, Any]:
     """Pull invoice fields out of a text layer. Returns whatever it is confident about."""
     out: dict[str, Any] = {"customer": "", "invoice_no": "", "amount": None,
-                           "due_date": None, "email": "", "phone": "", "confidence": "low"}
+                           "due_date": None, "email": "", "phone": "", "confidence": "low",
+                           "date_assumed": False}
     if not text or not text.strip():
         return out
 
@@ -103,8 +104,10 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
     if due is None and inv_date is not None:
         t = RE_TERMS.search(text)
         # MSMED Act caps the agreed credit period at 45 days; default to that
-        # rather than inventing a longer one.
+        # rather than inventing a longer one. The date is computed, not stated:
+        # the review screen asks the user to confirm it before it drives chasing.
         due = inv_date + timedelta(days=min(int(t.group(1)), 45) if t else 45)
+        out["date_assumed"] = True
     if due:
         out["due_date"] = due.isoformat()
         hits += 1
@@ -201,12 +204,17 @@ async def extract_via_vision(images: list[bytes]) -> list[dict[str, Any]]:
     rows = []
     for item in data.get("invoices", [])[:60]:
         amt = engine.parse_amount(item.get("amount"))
-        due = item.get("due_date") or item.get("invoice_date")
+        due_raw, assumed = item.get("due_date"), False
+        if not due_raw and item.get("invoice_date"):
+            # An invoice date is not a due date: keep it visible but flagged so
+            # the user confirms it in the review screen before it drives chasing.
+            due_raw, assumed = item.get("invoice_date"), True
         rows.append({
             "customer": _clean_name(str(item.get("customer") or "")),
             "invoice_no": str(item.get("invoice_no") or "")[:60],
             "amount": round(amt, 2) if amt else None,
-            "due_date": (engine.parse_date(due).isoformat() if due and engine.parse_date(due) else None),
+            "due_date": (engine.parse_date(due_raw).isoformat() if due_raw and engine.parse_date(due_raw) else None),
+            "date_assumed": assumed,
             "email": str(item.get("email") or "")[:120],
             "phone": str(item.get("phone") or "")[:40],
             "confidence": "medium",
@@ -232,6 +240,7 @@ async def extract_file(filename: str, blob: bytes) -> dict[str, Any]:
         return {"rows": [{
             "customer": i.customer, "invoice_no": i.invoice_no, "amount": i.amount,
             "due_date": i.due_date.isoformat() if i.due_date else None,
+            "date_assumed": i.date_source == "positional",
             "email": i.email, "phone": i.phone, "confidence": "high",
         } for i in invoices], "note": "; ".join(warnings)}
 

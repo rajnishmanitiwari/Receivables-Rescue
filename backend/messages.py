@@ -64,7 +64,7 @@ def _email_body(tier: str, inv: dict[str, Any], sender: str, company: str, curre
     ref = inv.get("invoice_no") or "the invoice"
     amt = fmt_money(inv["amount"], currency)
     days = inv["days_overdue"]
-    due = inv.get("due_date") or "the agreed date"
+    due = inv.get("due_date")  # build_messages only passes rows with a confirmed due date
     sign = f"{sender}\n{company}".strip()
 
     if tier == "reminder":
@@ -95,10 +95,11 @@ def _email_body(tier: str, inv: dict[str, Any], sender: str, company: str, curre
             f"Regards,\n{sign}"
         )
     else:
+        due_clause = f" against a due date of {due}" if inv.get("due_date") else ""
         body = (
             f"{name},\n\n"
-            f"This is a final notice on {ref} for {amt}, now {days} days overdue "
-            f"against a due date of {due}.\n\n"
+            f"This is a final notice on {ref} for {amt}, now {days} days overdue"
+            f"{due_clause}.\n\n"
             "I need payment, or a payment plan we both agree to, by [date you choose]. "
             "If anything is blocking it, tell me today and I will work with it.\n\n"
             "Please treat this as time-sensitive.\n\n"
@@ -133,8 +134,14 @@ def build_messages(
     sender = (sender or "").strip()[:80]
     company = (company or "").strip()[:80]
     out = []
-    for inv in priority[:limit]:
-        tier = inv["tier"]
+    for inv in priority:
+        if len(out) >= limit:
+            break
+        tier = inv.get("tier") or ""
+        if tier not in TIER_LABELS or not inv.get("due_date"):
+            # Rows without a confirmed due date carry no tier and no usable due
+            # date: unknown stays unknown, so no chase draft is built for them.
+            continue
         out.append({
             "invoice_no": inv.get("invoice_no", ""),
             "customer": inv["customer"],

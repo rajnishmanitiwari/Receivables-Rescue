@@ -375,6 +375,7 @@ async def next_action(req: PlanRequest):
         built = msg.build_messages(
             [{"invoice_no": req.number, "customer": req.customer or "the customer",
               "amount": req.amount, "days_overdue": max(0, (today - req.due).days),
+              "due_date": req.due.isoformat(),
               "tier": a.tier, "email": req.email, "phone": req.phone}],
             sender=req.sender, company=req.company, currency=req.currency, limit=1)
         out["message"] = {k: built[0][k] for k in ("tier", "tier_label", "why", "subject", "email", "whatsapp")}
