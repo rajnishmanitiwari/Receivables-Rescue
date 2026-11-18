@@ -18,9 +18,13 @@ except Exception:
     pass
 
 from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
+from typing import get_args, get_type_hints
 
 import engine
 import extract
@@ -92,7 +96,56 @@ app.add_middleware(
 # notified rules. Set ENABLE_MSMED_INTEREST=1 only after that review.
 INTEREST_ENABLED = os.environ.get("ENABLE_MSMED_INTEREST") == "1"
 
-api = APIRouter(prefix="/api")
+class UTF8CheckedRoute(APIRoute):
+    """A body that is not valid UTF-8 gets a clean 422, never a bare 500.
+
+    FastAPI parses the body as JSON for model endpoints whatever content type
+    is declared, and bytes that fail UTF-8 decoding raise UnicodeDecodeError
+    outside its validation path - surfacing as an unhandled 500 from the error
+    handler itself. Decode eagerly here, on the same request object so the body
+    cache carries through to the handler. Routes whose endpoint accepts file
+    uploads are exempt: uploaded files are legitimately binary. The raw body is
+    never echoed back.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        try:
+            hints = get_type_hints(self.endpoint)
+        except Exception:
+            hints = {}
+        self._expects_upload = any(
+            a is UploadFile or UploadFile in get_args(a) for a in hints.values()
+        )
+
+    def get_route_handler(self):
+        original = super().get_route_handler()
+
+        async def handler(request: Request):
+            if not self._expects_upload:
+                try:
+                    (await request.body()).decode("utf-8")
+                except UnicodeDecodeError:
+                    return JSONResponse(
+                        status_code=422,
+                        content={"detail": "Request body must be valid UTF-8."},
+                    )
+            return await original(request)
+
+        return handler
+
+
+api = APIRouter(prefix="/api", route_class=UTF8CheckedRoute)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(request: Request, exc: RequestValidationError):
+    """Validation errors name the failing fields but never echo raw input back."""
+    detail = [
+        {key: value for key, value in error.items() if key != "input"}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(detail)})
 
 # --- Mongo is used ONLY for an anonymous aggregate counter. No invoice data,
 # --- no customer names, no amounts per user are ever written. See /api/stats.
