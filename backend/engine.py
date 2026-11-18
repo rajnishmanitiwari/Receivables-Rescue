@@ -331,7 +331,90 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
             f"{undated} invoice(s) had no readable due date. Their lateness is unknown "
             "and they are not scheduled for chasing. Add due dates to include them."
         )
+    # Duplicate and conflicting bills. A bill number is the bill's identity -
+    # but only a REAL one: placeholder strings ("N/A", "-", "no") mean "no
+    # number", and rows without an identity are never merged, so two distinct
+    # bills are never collapsed into one.
+    # Exact duplicates (same customer, number, amount and due date) are one
+    # bill entered twice: collapse to one row with a warning, so the book is
+    # not doubled and no customer gets two chasers for one bill.
+    # The same number with a conflicting amount or due date means we cannot
+    # tell whether it is one bill or two. Neither version is counted in totals
+    # or scheduled for chasing - the records are quarantined with a warning
+    # until the user resolves which is real. We never silently pick a version.
+    def _identity(inv: Invoice) -> tuple[str, str] | None:
+        # Real identifiers keep their punctuation AND internal spacing: "1-2",
+        # "12", "1 2", "INV 1" and "INV1" are all different bills. Only case and
+        # leading/trailing whitespace are folded for the comparison.
+        num = inv.invoice_no.strip().lower()
+        if not num:
+            return None
+        # Placeholder classification is a separate, more aggressive probe:
+        # "N/A", "n.a.", "-", "no." all mean "there is no bill number here".
+        probe = re.sub(r"[\s./\\\-_:;#]+", "", num)  # classification only
+        if probe in ("", "na", "none", "nil", "no", "unknown", "tbd"):
+            return None
+        cust = re.sub(r"\s+", " ", inv.customer).strip().lower()
+        return (cust, num)
+
+    seen_numbers: dict[tuple[str, str], tuple[float, date | None]] = {}
+    original_numbers: dict[tuple[str, str], str] = {}
+    dupe_counts: dict[tuple[str, str], int] = {}
+    conflict_keys: set[tuple[str, str]] = set()
+    kept: list[Invoice] = []
+    for inv in invoices:
+        key = _identity(inv)
+        if key is None:
+            kept.append(inv)
+            continue
+        original_numbers.setdefault(key, inv.invoice_no.strip())
+        sig = (inv.amount, inv.due_date)
+        if key in seen_numbers:
+            if seen_numbers[key] == sig:
+                dupe_counts[key] = dupe_counts.get(key, 0) + 1
+                continue
+            conflict_keys.add(key)
+        else:
+            seen_numbers[key] = sig
+        kept.append(inv)
+    if conflict_keys:
+        kept = [inv for inv in kept
+                if _identity(inv) is None or _identity(inv) not in conflict_keys]
+    # A group that ends up quarantined was not "counted once" - the conflict
+    # warning below owns its story.
+    dupes = sum(n for key, n in dupe_counts.items() if key not in conflict_keys)
+    if dupes:
+        warnings.append(
+            f"{dupes} duplicate bill(s) - same customer, bill number, amount and due date - "
+            "were counted once, not twice."
+        )
+    conflict_warning = ""
+    if conflict_keys:
+        details = []
+        for key in sorted(conflict_keys)[:3]:
+            versions = sorted(
+                {(inv.amount, inv.due_date) for inv in invoices if _identity(inv) == key},
+                key=lambda v: (v[0], v[1] or date.min),
+            )
+            vs = " vs ".join(
+                f"{amt:,.2f} due {due.isoformat() if due else 'no due date'}"
+                for amt, due in versions[:4]
+            )
+            details.append(f"bill number {original_numbers[key]}: {vs}")
+        shown = "; ".join(details)
+        more = f" and {len(conflict_keys) - 3} more" if len(conflict_keys) > 3 else ""
+        conflict_warning = (
+            f"{len(conflict_keys)} bill number(s) have conflicting records ({shown}{more}). "
+            "It is not clear whether each is one bill or two, so none of those rows are "
+            "counted in the totals or scheduled for chasing. Fix the amounts, dates or bill "
+            "numbers and run again to include them."
+        )
+        warnings.append(conflict_warning)
+    invoices = kept
+
     if not invoices:
+        if conflict_warning:
+            raise ParseError(conflict_warning)
         raise ParseError("No rows had a usable amount. Check the amount column and try again.")
     return invoices, warnings
 
