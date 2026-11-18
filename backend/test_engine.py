@@ -164,25 +164,26 @@ def test_msmed_interest():
         prev = cur
 
 
-def test_statutory_clause_only_where_it_belongs():
+def test_no_statutory_clause_in_sendable_text():
     text = ("Customer,Invoice No,Amount,Due Date\n"
             f"Old Debt,INV-1,500000,{d(150)}\n"
             f"Fresh,INV-2,20000,{d(8)}\n"
             f"Tiny,INV-3,300,{d(200)}\n")
     inv, _ = engine.parse_invoices(text, today=TODAY)
     r = engine.analyse(inv, today=TODAY, bank_rate=5.50)
-    m = {x["customer"]: x for x in msg.build_messages(
-        r["priority"], sender="D", company="N", statutory_rate=r["statutory_rate"])}
-    assert "MSMED" in m["Old Debt"]["email"], "150-day bill should carry the clause"
-    assert "MSMED" not in m["Fresh"]["email"], "8-day bill must not threaten a statute"
-    assert "MSMED" not in m["Tiny"]["email"], "interest under 100 is not worth quoting"
+    # arithmetic stays an estimate on the report, but no statutory or legal
+    # assertion may reach a sendable message while eligibility is unverified
+    assert r["statutory_interest_total"] > 0
+    m = msg.build_messages(r["priority"], sender="D", company="N")
+    for x in m:
+        for field in ("email", "whatsapp", "subject"):
+            assert "MSMED" not in x[field]
+            assert "Samadhaan" not in x[field]
+            assert "Section 16" not in x[field]
     # sign-off must stay last in both channels
-    assert m["Old Debt"]["email"].rstrip().endswith("N")
-    assert m["Old Debt"]["whatsapp"].rstrip().endswith("D, N")
-    # switching MSMED off removes it everywhere
-    r2 = engine.analyse(inv, today=TODAY, bank_rate=None)
-    m2 = msg.build_messages(r2["priority"], sender="D", company="N", statutory_rate=None)
-    assert all("MSMED" not in x["email"] for x in m2)
+    old = {x["customer"]: x for x in m}["Old Debt"]
+    assert old["email"].rstrip().endswith("N")
+    assert old["whatsapp"].rstrip().endswith("D, N")
 
 
 if __name__ == "__main__":

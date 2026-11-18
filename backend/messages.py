@@ -42,8 +42,8 @@ TIER_LABELS = {
 TIER_GUIDANCE = {
     "reminder": "Assume it is an oversight. Give them a one-click way to pay.",
     "firm": "Name the date, name the amount, ask for a committed payment date.",
-    "escalation": "Move it up a level. Copy their finance lead and pause new work.",
-    "final": "State consequences plainly and give a hard deadline. Then follow through.",
+    "escalation": "Same facts, firmer tone, from you or someone senior. Ask for a committed date or a reason.",
+    "final": "A dated last ask: payment or a plan by a date you set. Only send a deadline you intend to keep.",
 }
 
 
@@ -89,10 +89,9 @@ def _email_body(tier: str, inv: dict[str, Any], sender: str, company: str, curre
         body = (
             f"Hi {name},\n\n"
             f"{ref} for {amt} is now {days} days overdue and I have not had a payment date.\n\n"
-            "I am copying your finance team so this stops sitting between us. To be direct: "
-            "until this is cleared I am holding new work on the account.\n\n"
-            "If cash timing is the issue, propose a payment plan and I will look at it "
-            "seriously. Silence is the only outcome I cannot work with.\n\n"
+            "If there is a problem with the invoice, or cash timing is the issue, tell me - "
+            "a payment plan is fine to propose.\n\n"
+            "What I cannot plan around is silence. A specific date, or a reason, is all I need.\n\n"
             f"Regards,\n{sign}"
         )
     else:
@@ -100,17 +99,15 @@ def _email_body(tier: str, inv: dict[str, Any], sender: str, company: str, curre
             f"{name},\n\n"
             f"This is a final notice on {ref} for {amt}, now {days} days overdue "
             f"against a due date of {due}.\n\n"
-            "If payment or a payment plan is not received within 7 days, I will pause "
-            "all work on the account and hand this to a professional to pursue. "
-            "I would rather not — one email today ends it.\n\n"
+            "I need payment, or a payment plan we both agree to, by [date you choose]. "
+            "If anything is blocking it, tell me today and I will work with it.\n\n"
             "Please treat this as time-sensitive.\n\n"
             f"Regards,\n{sign}"
         )
     return body
 
 
-def _whatsapp(tier: str, inv: dict[str, Any], sender: str, company: str, currency: str,
-              clause: str = "") -> str:
+def _whatsapp(tier: str, inv: dict[str, Any], sender: str, company: str, currency: str) -> str:
     name = inv["customer"].split()[0] if inv["customer"] else "Hi"
     ref = inv.get("invoice_no") or "the invoice"
     amt = fmt_money(inv["amount"], currency)
@@ -119,42 +116,11 @@ def _whatsapp(tier: str, inv: dict[str, Any], sender: str, company: str, currenc
     core = {
         "reminder": f"Hi {name}, quick reminder that {ref} ({amt}) is due. Anything you need from me to release it?",
         "firm": f"Hi {name}, {ref} ({amt}) is {days} days past due. Can you give me a payment date today?",
-        "escalation": f"{name}, {ref} ({amt}) is {days} days overdue and I have no payment date. I am holding new work until it clears. Can we sort this out today?",
-        "final": f"{name}, final notice on {ref} ({amt}), {days} days overdue. Payment or a payment plan within 7 days, or I will have to hand this to a professional. Please call me.",
+        "escalation": f"{name}, {ref} ({amt}) is {days} days overdue and I still have no payment date. Can you give me a date, or tell me what is blocking it?",
+        "final": f"{name}, final notice on {ref} ({amt}), {days} days overdue. Please pay, or send me a firm payment date, by [date you choose]. Please call me today.",
     }[tier]
-    # The sign-off always goes last, after any statutory note.
-    return " ".join(x for x in (core, clause.strip(), tail) if x)
-
-
-def _statutory_clause(inv: dict[str, Any], currency: str, rate: float | None, channel: str) -> str:
-    """Optional MSMED paragraph. Only for genuinely late, material invoices —
-    quoting a statute over a three-day delay reads as bluster, not leverage."""
-    amt = inv.get("statutory_interest") or 0
-    if not rate or amt < 100 or inv.get("days_overdue", 0) <= 45:
-        return ""
-    money = fmt_money(amt, currency)
-    if channel == "whatsapp":
-        return f"Statutory interest under the MSMED Act has also accrued to about {money}."
-    if inv["tier"] == "final":
-        return (
-            f"\n\nSeparately: under Section 16 of the MSMED Act, 2006, this delay has accrued "
-            f"approximately {money} in statutory interest at {rate}% per annum, compounded "
-            "monthly. If this is not settled I will register the claim on the MSME Samadhaan "
-            "portal. I would prefer to close it between us."
-        )
-    return (
-        f"\n\nFor completeness: under the MSMED Act, 2006 a delay of this length accrues "
-        f"statutory interest at {rate}% per annum, currently around {money}. I am not pursuing "
-        "that, and would rather just agree a payment date."
-    )
-
-
-def _insert_clause(body: str, clause: str) -> str:
-    """Place the clause above the sign-off rather than after it."""
-    if not clause:
-        return body
-    parts = body.rsplit("\n\n", 1)
-    return (parts[0] + clause + "\n\n" + parts[1]) if len(parts) == 2 else body + clause
+    # The sign-off always goes last.
+    return " ".join(x for x in (core, tail) if x)
 
 
 def build_messages(
@@ -163,7 +129,6 @@ def build_messages(
     company: str = "",
     currency: str = "INR",
     limit: int = 10,
-    statutory_rate: float | None = None,
 ) -> list[dict[str, Any]]:
     sender = (sender or "").strip()[:80]
     company = (company or "").strip()[:80]
@@ -182,10 +147,10 @@ def build_messages(
             "to_phone": inv.get("phone", ""),
             "subject": _subject(tier, inv, currency),
             "statutory_interest": inv.get("statutory_interest", 0),
-            "email": _insert_clause(
-                _email_body(tier, inv, sender or "[Your name]", company or "[Your company]", currency),
-                _statutory_clause(inv, currency, statutory_rate, "email")),
+            # No statutory/legal assertions in sendable text: MSMED eligibility is
+            # unverified, so no clause is inserted whatever rate the caller has.
+            "email": _email_body(tier, inv, sender or "[Your name]", company or "[Your company]", currency),
             "whatsapp": _whatsapp(tier, inv, sender or "[Your name]", company or "[Your company]",
-                                  currency, _statutory_clause(inv, currency, statutory_rate, "whatsapp")),
+                                  currency),
         })
     return out

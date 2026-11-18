@@ -28,7 +28,8 @@ MIN_GAP_DAYS = 5
 @dataclass(frozen=True)
 class Event:
     day: date
-    type: str                  # "sent", "reply", "payment", "resolved" (a person reviewed the last reply)
+    type: str                  # "sent", "reply", "payment", "resolved" (owner reviewed the thread),
+                               # "reconsent" (owner attestation: the contact asked to be contacted again)
     label: Label | None = None
     promise_date: date | None = None
     amount: float | None = None
@@ -69,9 +70,9 @@ _NEG_DISPUTE = re.compile(r"\bno disput\w*\b")
 # accountant") or one disputed invoice all need a human - never a sticky STOP.
 _OPT_NEGATED = re.compile(
     r"\b(do not|dont|does not|doesnt|will not|wont|would not|wouldnt|cannot|can not|cant|never)\s+"
-    r"(stop\b|opt(ing)?(\s+me)?[ -]?out)"
+    r"(stop\b|opt(ing)?(\s+me)?[ -]?out|unsubscribe\w*)"
     r"|\b(did not|didnt|does not|doesnt|do not|dont|never|not)\s+"
-    r"(say|said|saying|ask|asked|asking|tell|told|telling|mean|meant|opting?(\s+me)?[ -]?out)\b"
+    r"(say|said|saying|ask|asked|asking|tell|told|telling|mean|meant|opting?(\s+me)?[ -]?out|unsubscribe\w*)\b"
     r"|\bdoes\s*not\s+mean\s+stop\b|\bdoesnt\s+mean\s+stop\b"
 )
 _OPT_QUALIFIED = re.compile(
@@ -181,50 +182,109 @@ def next_action(inv: Invoice, events: list[Event], today: date) -> Action:
     paid = sum(e.amount or 0 for e in events if e.type == "payment" and e.day <= today)
     if paid >= inv.amount:
         return Action(Kind.STOP, "fully paid by recorded payments")
-    evs = sorted((e for e in events if e.day <= today), key=lambda e: e.day)
+    # Chronology rule for owner-recorded review ("resolved") and re-consent
+    # ("reconsent") events - both are facts the business owner records, never
+    # inferred from reply text. A restriction is cleared only when its day is
+    # on/before the clearing event's day AND it appears earlier in the events
+    # list; same-day ties are settled by list order. If the two signals disagree
+    # the restriction stands with its usual kind and the reason says why:
+    # ordering conflicts are never silent, and no signal alone can clear.
+    indexed = sorted(((i, e) for i, e in enumerate(events) if e.day <= today),
+                     key=lambda t: (t[1].day, t[0]))
+    evs = [e for _, e in indexed]
     replies = [e for e in evs if e.type == "reply"]
-    # Opt-out and dispute are sticky: no later event reopens them without a human.
-    optouts = [e for e in replies if e.label == Label.DONT_CONTACT or "optout" in e.flags]
-    if optouts:
-        dispute_open = any(
-            (e.label == Label.DISPUTE or "dispute" in e.flags)
-            and not any(r.type == "resolved" and r.day >= e.day for r in evs)
-            for e in replies)
-        if dispute_open:
+    reply_pairs = [(i, e) for i, e in indexed if e.type == "reply"]
+    resolved = [(i, e) for i, e in indexed if e.type == "resolved"]
+    reconsents = [(i, e) for i, e in indexed if e.type == "reconsent"]
+
+    def _clears(restr, clearers):
+        return any(restr[1].day <= c[1].day and restr[0] < c[0] for c in clearers)
+
+    def _conflicts(restr, clearers):
+        return any((restr[1].day <= c[1].day) != (restr[0] < c[0]) for c in clearers)
+
+    optout_pairs = [(i, e) for i, e in reply_pairs
+                    if e.label == Label.DONT_CONTACT or "optout" in e.flags]
+    cleared_optouts = [o for o in optout_pairs if _clears(o, reconsents)]
+    standing_optouts = [o for o in optout_pairs if not _clears(o, reconsents)]
+    dispute_pairs = [(i, e) for i, e in reply_pairs
+                     if e.label == Label.DISPUTE or "dispute" in e.flags]
+    open_disputes = [d for d in dispute_pairs if not _clears(d, resolved)]
+
+    # Resumption is never silent: a cleared opt-out is reported with both dates,
+    # and a re-consent that cleared nothing is a visible no-op, not an error.
+    history_note = ""
+    if cleared_optouts:
+        o = max(cleared_optouts, key=lambda t: (t[1].day, t[0]))
+        c = min((c for c in reconsents if o[1].day <= c[1].day and o[0] < c[0]),
+                key=lambda t: (t[1].day, t[0]))
+        history_note = (f" (contact history: opted out {o[1].day.isoformat()}; "
+                        f"re-consent recorded {c[1].day.isoformat()})")
+    noop_note = ""
+    if reconsents and not optout_pairs:
+        earliest = min(reconsents, key=lambda t: (t[1].day, t[0]))
+        noop_note = (f" (re-consent recorded {earliest[1].day.isoformat()} had no "
+                     f"earlier opt-out to clear)")
+
+    def _with_notes(a: "Action") -> "Action":
+        if a.kind == Kind.STOP:
+            return a
+        note = noop_note
+        if a.kind in (Kind.DRAFT, Kind.HOLD, Kind.NONE):
+            note = history_note + noop_note
+        if not note:
+            return a
+        return Action(a.kind, a.reason + note, a.tier, a.until)
+
+    # Opt-out and dispute are sticky: only an owner-recorded re-consent reopens
+    # contact, and only an owner-recorded review closes a dispute.
+    if standing_optouts:
+        if open_disputes:
             # Dual intent: keep no-contact sticky AND get a person for the dispute.
             # After resolution the opt-out still stands: no resume without re-consent.
-            return Action(Kind.HUMAN, "opt-out recorded with an open dispute; a person must resolve it - no further contact without explicit re-consent")
+            return Action(Kind.HUMAN, "opt-out recorded with an open dispute; a person must resolve it - no further contact unless you record an explicit re-consent")
+        conflict_optouts = [o for o in standing_optouts if _conflicts(o, reconsents)]
+        if conflict_optouts:
+            o = min(conflict_optouts, key=lambda t: (t[1].day, t[0]))
+            return Action(Kind.STOP, f"contact opt-out recorded; opt-out dated {o[1].day.isoformat()} could not be ordered before the recorded re-consent - confirm the event order")
         return Action(Kind.STOP, "contact opt-out recorded")
-    if any(e.label == Label.DISPUTE for e in replies):
+    if open_disputes:
+        conflict_disputes = [d for d in open_disputes if _conflicts(d, resolved)]
+        if conflict_disputes:
+            d = min(conflict_disputes, key=lambda t: (t[1].day, t[0]))
+            return Action(Kind.PAUSE, f"dispute dated {d[1].day.isoformat()} could not be ordered before the review record - confirm the event order")
         return Action(Kind.PAUSE, "dispute recorded; a person must resolve it")
     days_over = (today - inv.due).days
     if days_over < 1:
-        return Action(Kind.NONE, "not overdue")
+        return _with_notes(Action(Kind.NONE, "not overdue"))
     last_reply = replies[-1] if replies else None
     if last_reply and last_reply.label == Label.PAID:
-        return Action(Kind.HUMAN, "customer says paid but no matching payment recorded")
+        return _with_notes(Action(Kind.HUMAN, "customer says paid but no matching payment recorded"))
     if last_reply and last_reply.label == Label.PROMISE:
         if last_reply.promise_date is None:
-            return Action(Kind.HUMAN, "promise without a date")
+            return _with_notes(Action(Kind.HUMAN, "promise without a date"))
         if today <= last_reply.promise_date:
-            return Action(Kind.HOLD, "honouring promised date", until=last_reply.promise_date)
-    if last_reply and last_reply.label == Label.UNKNOWN and not any(e.type == "resolved" and e.day >= last_reply.day for e in evs):
-        return Action(Kind.HUMAN, "latest reply not understood")
+            return _with_notes(Action(Kind.HOLD, "honouring promised date", until=last_reply.promise_date))
+    last_pair = reply_pairs[-1] if reply_pairs else None
+    if last_pair and last_reply.label == Label.UNKNOWN and not _clears(last_pair, resolved):
+        if _conflicts(last_pair, resolved):
+            return _with_notes(Action(Kind.HUMAN, f"latest reply dated {last_reply.day.isoformat()} could not be ordered before the review record - confirm the event order"))
+        return _with_notes(Action(Kind.HUMAN, "latest reply not understood"))
     sent = [e for e in evs if e.type == "sent"]
     if sent and (today - sent[-1].day).days < MIN_GAP_DAYS:
-        return Action(Kind.HOLD, "minimum gap since last follow-up",
-                      until=sent[-1].day + timedelta(days=MIN_GAP_DAYS))
+        return _with_notes(Action(Kind.HOLD, "minimum gap since last follow-up",
+                      until=sent[-1].day + timedelta(days=MIN_GAP_DAYS)))
     tier = tier_for(days_over)
     order = [t[0] for t in TIERS]
     if sent and sent[-1].tier in order and order.index(sent[-1].tier) >= order.index(tier):
         # never repeat the same tier; step at most one rung up from the last one sent
         nxt = order[min(order.index(sent[-1].tier) + 1, len(order) - 1)]
         if nxt == sent[-1].tier or days_over < dict((n, lo) for n, lo, _ in TIERS)[nxt]:
-            return Action(Kind.HOLD, "already sent this tier; wait for next tier",
-                          until=inv.due + timedelta(days=dict((n, lo) for n, lo, _ in TIERS)[nxt]))
+            return _with_notes(Action(Kind.HOLD, "already sent this tier; wait for next tier",
+                          until=inv.due + timedelta(days=dict((n, lo) for n, lo, _ in TIERS)[nxt])))
         tier = nxt
     elif sent and sent[-1].tier in order:
         tier = order[min(order.index(sent[-1].tier) + 1, order.index(tier))]
     if last_reply and last_reply.label == Label.PARTIAL:
-        return Action(Kind.DRAFT, "partial payment acknowledged; chase balance", tier="reminder")
-    return Action(Kind.DRAFT, f"{days_over} days overdue", tier=tier)
+        return _with_notes(Action(Kind.DRAFT, "partial payment acknowledged; chase balance", tier="reminder"))
+    return _with_notes(Action(Kind.DRAFT, f"{days_over} days overdue", tier=tier))

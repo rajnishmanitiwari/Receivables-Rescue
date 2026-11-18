@@ -176,7 +176,6 @@ async def analyse(req: AnalyseRequest):
         company=req.company_name,
         currency=req.currency,
         limit=10,
-        statutory_rate=report.get("statutory_rate"),
     )
     if llm.is_enabled():
         followups = await llm.polish(followups, req.tone, req.language)
@@ -264,8 +263,8 @@ UPLOAD_ENABLED = _register_upload_route()
 
 class PlanEventIn(BaseModel):
     day: date
-    type: str = Field(..., pattern="^(sent|reply|payment)$")
-    text: str | None = Field(None, max_length=2000)   # reply text; classified by a keyword baseline
+    type: str = Field(..., pattern="^(sent|reply|payment|resolved|reconsent)$")
+    text: str | None = Field(None, max_length=2000)   # reply text (classified); on reconsent an optional owner note, stored with the session, never parsed
     label: str | None = None                         # or pass an explicit label
     promise_date: date | None = None
     amount: float | None = Field(None, ge=0)
@@ -279,11 +278,23 @@ class PlanRequest(BaseModel):
     status: str = Field("open", pattern="^(open|void|paid)$")
     today: date | None = None
     events: list[PlanEventIn] = Field(default_factory=list, max_length=200)
+    # Optional context so a draft decision can return the message for ITS tier;
+    # without them the templates fall back to the same placeholders analyse uses.
+    customer: str = Field("", max_length=120)
+    email: str = Field("", max_length=200)
+    phone: str = Field("", max_length=40)
+    sender: str = Field("", max_length=80)
+    company: str = Field("", max_length=80)
+    currency: str = Field("INR", max_length=8)
 
 
 @api.post("/next-action")
 async def next_action(req: PlanRequest):
     """Deterministic follow-up decision prototype. Sends nothing; the caller decides."""
+    today = req.today or date.today()
+    for e in req.events:
+        if e.type in ("resolved", "reconsent") and e.day > today:
+            raise HTTPException(422, f"{e.type} day cannot be in the future")
     evs = []
     for e in req.events:
         label = None
@@ -301,10 +312,19 @@ async def next_action(req: PlanRequest):
                 flags = frozenset({"dispute"})
         evs.append(fp.Event(e.day, e.type, label, e.promise_date, e.amount, e.tier, flags))
     inv = fp.Invoice(req.number, req.amount, req.due, req.status)
-    today = req.today or date.today()
     a = fp.next_action(inv, evs, today)
     out = {"kind": a.kind.value, "reason": a.reason, "tier": a.tier,
            "until": a.until.isoformat() if a.until else None, "prototype": True}
+    # The card's draft must match the current plan: when the plan is to send (now
+    # or after a hold), return the message for the decided tier so the caller
+    # never shows a stale one. Interest clause stays off: no statutory_rate here.
+    if a.kind in (fp.Kind.DRAFT, fp.Kind.HOLD) and a.tier:
+        built = msg.build_messages(
+            [{"invoice_no": req.number, "customer": req.customer or "the customer",
+              "amount": req.amount, "days_overdue": max(0, (today - req.due).days),
+              "tier": a.tier, "email": req.email, "phone": req.phone}],
+            sender=req.sender, company=req.company, currency=req.currency, limit=1)
+        out["message"] = {k: built[0][k] for k in ("tier", "tier_label", "why", "subject", "email", "whatsapp")}
     # Advisory only: when the plan is blocked on a date-less promise, suggest a date
     # with provenance for the user to confirm or edit. Never applied to the plan.
     # The source reply is the planner's own eligible target: the temporally latest

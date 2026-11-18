@@ -309,3 +309,5 @@ table.data tbody tr:hover{background:var(--wash)}
 .fu-suggest-text{font-size:13px;color:var(--muted);line-height:1.45}
 .fu-suggest-text strong{color:var(--ink)}
 .fu-suggest-actions{display:flex;gap:8px;flex-wrap:wrap}
+.fu-check{display:flex;align-items:center;gap:8px;font-size:14px;margin:6px 0}
+.fu-check input{width:16px;height:16px}

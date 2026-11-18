@@ -170,7 +170,7 @@ const KIND_PRESENT = {
   none:       { label: "Nothing to do",    cls: "t-ok" },
 };
 
-export function FollowUp({ m }) {
+export function FollowUp({ m, sender, company, currency, onDecision }) {
   const [events, setEvents] = useState([]);
   const [decision, setDecision] = useState(null);
   const [replyOpen, setReplyOpen] = useState(false);
@@ -180,6 +180,9 @@ export function FollowUp({ m }) {
   const [editingDate, setEditingDate] = useState(false);
   const [dismissedSug, setDismissedSug] = useState("");
   const [payAmount, setPayAmount] = useState(String(m.amount || ""));
+  const [reconOpen, setReconOpen] = useState(false);
+  const [reconNote, setReconNote] = useState("");
+  const [reconAttest, setReconAttest] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -198,16 +201,23 @@ export function FollowUp({ m }) {
           amount: Number(m.amount) || 1,
           due: iso(due),
           today: iso(today),
+          customer: (m.customer || "").slice(0, 120),
+          email: (m.to_email || "").slice(0, 200),
+          phone: (m.to_phone || "").slice(0, 40),
+          sender: (sender || "").slice(0, 80),
+          company: (company || "").slice(0, 80),
+          currency: currency || "INR",
           events: buildNextActionEvents(nextEvents, iso(today)),
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.detail || "The follow-up helper is unavailable right now.");
       setDecision(json);
+      if (onDecision) onDecision(json);
     } catch (e2) {
       setErr(e2.message || "The follow-up helper is unavailable right now.");
     } finally { setBusy(false); }
-  }, [m]);
+  }, [m, sender, company, currency, onDecision]);
 
   const nextEventId = useRef(1);
   // The day a reply was actually received, editable: pasting a reply today
@@ -308,6 +318,51 @@ export function FollowUp({ m }) {
           </span>
         </div>
       ) : null}
+      {decision && (decision.kind === "pause" ||
+        (decision.kind === "human" && /dispute|not understood/.test(decision.reason || ""))) ? (
+        <div className="fu-box">
+          <span className="fu-suggest-text">
+            If you have looked into this yourself and closed it out, mark it reviewed (dated today).
+          </span>
+          <span className="fu-suggest-actions">
+            <button type="button" className="btn ghost sm" disabled={busy}
+              onClick={() => log({ type: "resolved" })}>I reviewed this</button>
+          </span>
+        </div>
+      ) : null}
+      {decision && decision.kind === "stop" && /opt-out/.test(decision.reason || "") ? (
+        <div className="fu-box">
+          {!reconOpen ? (
+            <span className="fu-suggest-actions">
+              <button type="button" className="btn ghost sm" disabled={busy}
+                onClick={() => setReconOpen(true)}>They asked to hear from you again</button>
+            </span>
+          ) : (
+            <div>
+              <label className="fu-check">
+                <input type="checkbox" checked={reconAttest}
+                  onChange={(e) => setReconAttest(e.target.checked)} />
+                The contact asked to be contacted again (in writing or a reply).
+              </label>
+              <label htmlFor={"fu-recon-" + m.invoice_no}>Note (optional, kept in this session only)</label>
+              <input id={"fu-recon-" + m.invoice_no} type="text" value={reconNote}
+                onChange={(e) => setReconNote(e.target.value)}
+                placeholder="e.g. Called on the 15th, happy to get reminders" />
+              <span className="fu-suggest-actions">
+                <button type="button" className="btn primary sm" disabled={busy || !reconAttest}
+                  onClick={() => { log({ type: "reconsent", text: reconNote.trim() || undefined }); setReconOpen(false); setReconNote(""); setReconAttest(false); }}>
+                  Record re-consent
+                </button>
+                <button type="button" className="btn ghost sm" disabled={busy}
+                  onClick={() => { setReconOpen(false); setReconAttest(false); }}>Cancel</button>
+              </span>
+              <span className="hint">
+                Only record this if it actually happened. DueRise records what you tell it - when and whether to write again stays your call.
+              </span>
+            </div>
+          )}
+        </div>
+      ) : null}
       {sug && sugReply && dismissedSug !== sugKey ? (
         <div className="fu-suggest">
           <span className="fu-suggest-text">
@@ -372,19 +427,28 @@ export function FollowUp({ m }) {
   );
 }
 
-function MessageCard({ m, currency }) {
+export function MessageCard({ m, currency, sender, company }) {
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState("whatsapp");
-  const body = channel === "email" ? m.email : m.whatsapp;
-  const wa = m.to_phone ? "https://wa.me/" + m.to_phone.replace(/[^0-9]/g, "") + "?text=" + encodeURIComponent(m.whatsapp) : null;
+  const [fuDecision, setFuDecision] = useState(null);
+  // The card shows the CURRENT plan's draft: after a new decision with a
+  // message, that message (and its tier) replaces the original analysis one.
+  const dm = fuDecision && fuDecision.message && (fuDecision.kind === "draft" || fuDecision.kind === "hold") ? fuDecision.message : null;
+  const blocked = fuDecision && (fuDecision.kind === "stop" || fuDecision.kind === "pause" || fuDecision.kind === "human" || fuDecision.kind === "none");
+  const curSubject = dm ? dm.subject : m.subject;
+  const curWhatsapp = dm ? dm.whatsapp : m.whatsapp;
+  const curEmail = dm ? dm.email : m.email;
+  const body = channel === "email" ? curEmail : curWhatsapp;
+  const wa = m.to_phone ? "https://wa.me/" + m.to_phone.replace(/[^0-9]/g, "") + "?text=" + encodeURIComponent(curWhatsapp) : null;
   // Accept exactly one well-formed address; anything with control chars, query
   // separators or extra recipients is dropped instead of interpolated.
   const safeEmail = safeEmailAddress(m.to_email);
-  const mailto = buildMailto(m);
+  const mailto = buildMailto({ ...m, subject: curSubject, email: curEmail });
+  const badge = blocked ? KIND_PRESENT[fuDecision.kind] : null;
   return (
     <div className={"msg" + (open ? " open" : "")}>
       <button type="button" className="msg-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className={"tier " + TIER_CLASS[m.tier]}>{m.tier_label}</span>
+        <span className={"tier " + (badge ? badge.cls : TIER_CLASS[dm ? dm.tier : m.tier])}>{badge ? badge.label : (dm ? dm.tier_label : m.tier_label)}</span>
         <span className="msg-cust">{m.customer}</span>
         <span className="msg-meta">
           {m.invoice_no ? m.invoice_no + " · " : ""}{money(m.amount, currency)}
@@ -394,20 +458,26 @@ function MessageCard({ m, currency }) {
       </button>
       {open ? (
         <div className="msg-body">
-          <p className="msg-why">{m.why}</p>
-          <div className="tabs" role="tablist">
-            <button type="button" role="tab" aria-selected={channel === "whatsapp"} className={channel === "whatsapp" ? "tab on" : "tab"} onClick={() => setChannel("whatsapp")}>WhatsApp</button>
-            <button type="button" role="tab" aria-selected={channel === "email"} className={channel === "email" ? "tab on" : "tab"} onClick={() => setChannel("email")}>Email</button>
-          </div>
-          {channel === "email" ? <div className="subject"><strong>Subject:</strong> {m.subject}</div> : null}
-          <pre className="msg-text">{body}</pre>
-          <div className="msg-actions">
-            <Copy text={channel === "email" ? m.subject + "\n\n" + m.email : m.whatsapp} label="Copy message" />
-            {channel === "email" && mailto ? <a className="btn ghost sm" href={mailto}>Open in email</a> : null}
-            {channel === "whatsapp" && wa ? <a className="btn primary sm" href={wa} target="_blank" rel="noreferrer">Send on WhatsApp</a> : null}
-            {!safeEmail && !m.to_phone ? <span className="hint">No email or phone saved for this one.</span> : null}
-          </div>
-          <FollowUp m={m} />
+          {blocked ? (
+            <p className="hint">No message to send while this one is {fuDecision.kind === "stop" ? "stopped" : fuDecision.kind === "pause" ? "paused" : fuDecision.kind === "none" ? "settled" : "waiting on your call"} - the plan below says why.</p>
+          ) : (
+            <>
+              <p className="msg-why">{dm ? dm.why : m.why}</p>
+              <div className="tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={channel === "whatsapp"} className={channel === "whatsapp" ? "tab on" : "tab"} onClick={() => setChannel("whatsapp")}>WhatsApp</button>
+                <button type="button" role="tab" aria-selected={channel === "email"} className={channel === "email" ? "tab on" : "tab"} onClick={() => setChannel("email")}>Email</button>
+              </div>
+              {channel === "email" ? <div className="subject"><strong>Subject:</strong> {curSubject}</div> : null}
+              <pre className="msg-text">{body}</pre>
+              <div className="msg-actions">
+                <Copy text={channel === "email" ? curSubject + "\n\n" + curEmail : curWhatsapp} label="Copy message" />
+                {channel === "email" && mailto ? <a className="btn ghost sm" href={mailto}>Open in email</a> : null}
+                {channel === "whatsapp" && wa ? <a className="btn primary sm" href={wa} target="_blank" rel="noreferrer">Send on WhatsApp</a> : null}
+                {!safeEmail && !m.to_phone ? <span className="hint">No email or phone saved for this one.</span> : null}
+              </div>
+            </>
+          )}
+          <FollowUp m={m} sender={sender} company={company} currency={currency} onDecision={setFuDecision} />
         </div>
       ) : null}
     </div>
@@ -667,10 +737,10 @@ export default function App() {
                 <h2>Possible late-payment interest (estimate)</h2>
                 <p className="msme-figure">{money(rep.statutory_interest_total, currency)}</p>
                 <p>
-                  Under the MSMED Act, a buyer who pays a registered micro or small business late owes
-                  compound interest at <strong>{rep.statutory_rate}% a year</strong> &mdash; three times
-                  the RBI Bank Rate. It is now written into your
-                  final-notice messages below.
+                  Under the MSMED Act, a buyer who pays a registered micro or small business late
+                  may owe compound interest at <strong>{rep.statutory_rate}% a year</strong> - three times
+                  the RBI Bank Rate. Whether that applies to you depends on your registration and
+                  your buyers; this figure is an estimate, not an entitlement.
                 </p>
                 <p className="fineprint">{rep.assumptions.msmed.note}</p>
               </section>
@@ -713,7 +783,7 @@ export default function App() {
                 </div>
               </div>
               <div className="msgs">
-                {result.messages.map((m, i) => <MessageCard key={i} m={m} currency={currency} />)}
+                {result.messages.map((m, i) => <MessageCard key={i} m={m} currency={currency} sender={sender} company={company} />)}
               </div>
             </section>
 
