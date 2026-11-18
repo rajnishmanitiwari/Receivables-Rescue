@@ -170,3 +170,29 @@ def test_extract_pdf_text_explicit_due_is_not_assumed():
         "Invoice INV-9\nDate: 01/10/2026\nDue Date: 15/11/2026\nTotal: Rs 45,000\nBilled to Acme")
     assert row["due_date"] == "2026-11-15"
     assert row["date_assumed"] is False
+
+
+def test_extract_stated_terms_honoured_not_capped():
+    import extract
+    # "Net 60" means 60 days: a stated credit period must never be shortened.
+    # Chasing 15 days before the agreed date harms the customer's trust.
+    row = extract.parse_invoice_text(
+        "Invoice INV-9\nDate: 01/10/2026\nTerms: Net 60\nTotal: Rs 45,000\nBilled to Acme")
+    assert row["due_date"] == "2026-11-30"
+    assert row["date_assumed"] is True  # still computed, still needs confirmation
+
+
+def test_extract_stated_terms_shorter_than_default_honoured():
+    import extract
+    row = extract.parse_invoice_text(
+        "Invoice INV-9\nDate: 01/10/2026\nTerms: Net 30\nTotal: Rs 45,000\nBilled to Acme")
+    assert row["due_date"] == "2026-10-31"
+    assert row["date_assumed"] is True
+
+
+def test_extract_no_terms_falls_back_to_45_day_estimate():
+    import extract
+    row = extract.parse_invoice_text(
+        "Invoice INV-9\nDate: 01/10/2026\nTotal: Rs 45,000\nBilled to Acme")
+    assert row["due_date"] == "2026-11-15"
+    assert row["date_assumed"] is True

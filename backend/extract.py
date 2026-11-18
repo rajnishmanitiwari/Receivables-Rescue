@@ -103,10 +103,11 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
         due = _first_date(m.group(1))
     if due is None and inv_date is not None:
         t = RE_TERMS.search(text)
-        # MSMED Act caps the agreed credit period at 45 days; default to that
-        # rather than inventing a longer one. The date is computed, not stated:
-        # the review screen asks the user to confirm it before it drives chasing.
-        due = inv_date + timedelta(days=min(int(t.group(1)), 45) if t else 45)
+        # Stated credit terms are honoured as written: "Net 60" means 60 days,
+        # never silently shortened. With no stated terms, fall back to a 45-day
+        # estimate. Either way the date is computed, not stated: the review
+        # screen asks the user to confirm it before it drives chasing.
+        due = inv_date + timedelta(days=int(t.group(1)) if t else 45)
         out["date_assumed"] = True
     if due:
         out["due_date"] = due.isoformat()
