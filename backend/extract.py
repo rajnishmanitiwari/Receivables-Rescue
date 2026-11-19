@@ -54,11 +54,88 @@ _MONEY_IN_NAME = re.compile(r"(?:rs\.?|inr|₹|\$|usd|€|£)\s*\d", re.I)
 
 _JUNK_LINE = re.compile(r"^\s*(?:gstin|pan|state|address|phone|email|tel|mobile)\b", re.I)
 
+# Strong seller/payment markers end the bill-to block WHEREVER they appear
+# in a line: natural sentences ("For queries call us on ...", "Please remit
+# payment to ...") put them mid-line, and what follows is the seller's own
+# contact or bank detail, never the debtor's.
+_STRONG_BOUNDARY = re.compile(
+    r"quer(?:y|ies)\b|questions?\b|contact\s+us|remit\b|remittance|payment\b|pay\s+to\b|"
+    r"bank\b|a/c\b|account\b|ifsc|swift\b|\bupi\b", re.I)
+# Weaker words only end the block at line START, so names and addresses that
+# merely contain them ("Total Home Developers", "Due Lane") stay intact.
+_WEAK_BOUNDARY = re.compile(
+    r"^\s*(?:terms?|invoice|inv\b|due\b|total|sub\s*-?\s*total|tax\b|gst\b|cgst|sgst|"
+    r"igst|amount|description|item|qty\b|quantity|rate\b|price\b|thank|note\b|"
+    r"declaration|signature|authori[sz]ed|place\s+of\s+supply)", re.I)
+# Another party label at line start also closes the block.
+_PARTY_BOUNDARY = re.compile(
+    r"^\s*(?:ship(?:ping)?\s*to|ship\s*-|seller|from\b|bill\s*to|billed\s*to|"
+    r"sold\s*to|buyer|customer)", re.I)
+
+def _plausible_phone(raw: str) -> bool:
+    """A labeled number still has to BE a phone: 10-digit mobile (optionally
+    with a +91/91/0 prefix) or an 11-digit 0-prefixed landline. Bank account
+    numbers sit in the same 9-18 digit range, so a bare length check lets a
+    bank account near a contact word become a wa.me link."""
+    digits = re.sub(r"\D", "", raw)
+    if digits.startswith("00"):
+        return False
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    if len(digits) == 11 and digits.startswith("0"):
+        return True  # STD-prefixed landline
+    if len(digits) == 11 and digits.startswith("91"):
+        return False  # 9-digit subscriber number is not a full phone
+    return len(digits) == 10 and digits[0] in "6789"
+
+
+def _column_segment(line: str) -> str:
+    """First column segment of a line. Two-column PDF text interleaves the
+    seller column after a wide gap; only the segment beside the bill-to
+    content is attributable to the debtor."""
+    return re.split(r"\s{3,}|\t", line, maxsplit=1)[0]
+
+
+# A contact counts as the debtor's only when a contact label introduces it on
+# the same line. Bare emails and digit runs are proximity, not attribution:
+# a syntactic email says nothing about whose it is, and bank account numbers
+# are 9-18 digits that would otherwise become a wa.me link to a bank.
+_PHONE_LABEL = re.compile(r"\b(?:phone|tel|mobile|mob|contact|call)\b", re.I)
+_EMAIL_LABEL = re.compile(r"\b(?:e?-?mail|contact)\b", re.I)
+
 
 def _clean_name(s: str) -> str:
-    s = re.sub(r"\s{2,}", " ", (s or "").strip(" :,-\t"))
+    # Two-column layouts glue the seller column onto the bill-to line after a
+    # wide gap; the debtor's name is the first segment.
+    s = re.split(r"\s{3,}|\t", s or "")[0]
+    s = RE_EMAIL.sub(" ", s)
+    s = RE_PHONE.sub(" ", s)
+    s = re.sub(r"\s{2,}", " ", s.strip(" :,-\t"))
     s = re.sub(r"\b(GSTIN|PAN)\b.*$", "", s, flags=re.I).strip()
     return s[:120]
+
+
+def _debtor_contact_zone(text: str, m_billto) -> str:
+    """The bill-to label's own line remainder plus the lines after it, up to
+    the first boundary: a strong seller/payment marker anywhere, or a weak or
+    party marker at line start. Contacts outside this zone are not
+    attributable to the debtor."""
+    lines = [_column_segment(m_billto.group(1))]
+    for line in text[m_billto.end():].splitlines():
+        if _WEAK_BOUNDARY.match(line) or _PARTY_BOUNDARY.match(line):
+            break
+        strong = _STRONG_BOUNDARY.search(line)
+        if strong:
+            # A mid-line strong marker ends the attributable region: what
+            # follows it on the line is seller-side boilerplate.
+            seg = _column_segment(line[:strong.start()])
+            if seg.strip():
+                lines.append(seg)
+            break
+        lines.append(_column_segment(line))
+        if len(lines) >= 7:
+            break
+    return "\n".join(lines)
 
 
 def _first_date(text: str) -> tuple[date | None, bool]:
@@ -156,8 +233,9 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
         out["amount"] = round(best, 2)
         hits += 1
 
-    m = RE_BILLTO.search(text)
-    if m:
+    m_billto = RE_BILLTO.search(text)
+    if m_billto:
+        m = m_billto
         cand = _clean_name(m.group(1))
         if not cand or _JUNK_LINE.match(cand) or _MONEY_IN_NAME.search(cand):
             cand = ""
@@ -175,14 +253,24 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
     # the review step requires the user to type who owes them.
 
 
-    m = RE_EMAIL.search(text)
-    if m:
-        out["email"] = m.group(0)[:120]
-    m = RE_PHONE.search(text.replace("GSTIN", " "))
-    if m:
-        digits = re.sub(r"\D", "", m.group(0))
-        if 10 <= len(digits) <= 13:
-            out["phone"] = m.group(0).strip()[:40]
+    # Contact details belong to the debtor only when they are attributable:
+    # inside the bill-to block (label line plus lines up to the first
+    # boundary) AND introduced by a contact label at the START of the line.
+    # A label that appears after name or address text is ambiguous: a
+    # two-column gutter narrower than the wide-gap cut can glue the seller's
+    # column onto a debtor address line, so mid-line labels stay blank rather
+    # than risk chasing the seller, a bank, or a warehouse.
+    contact_zone = _debtor_contact_zone(text, m_billto) if m_billto else ""
+    for line in contact_zone.splitlines():
+        stripped = line.lstrip()
+        if _PHONE_LABEL.match(stripped):
+            m = RE_PHONE.search(line.replace("GSTIN", " "))
+            if m and _plausible_phone(m.group(0)):
+                out["phone"] = m.group(0).strip()[:40]
+        if _EMAIL_LABEL.match(stripped):
+            m = RE_EMAIL.search(line)
+            if m:
+                out["email"] = m.group(0)[:120]
 
     out["confidence"] = "high" if hits >= 3 else "medium" if hits == 2 else "low"
     return out
