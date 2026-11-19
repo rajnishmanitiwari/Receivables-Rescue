@@ -252,3 +252,29 @@ def test_pdf_computed_due_date_reason_is_computed():
     assert row["due_date"] == "2026-07-31"
     assert row["date_assumed"] is True
     assert row["date_assumed_reason"] == "computed"
+
+
+def test_pdf_computed_due_on_ambiguous_base_is_visibly_unconfirmed():
+    # Base date 05/06/2026 reads day-first (5 Jun) or month-first (6 May), so a
+    # due date computed from it can be a month off. It must not present as an
+    # ordinary computed estimate: it gets the visibly unconfirmed treatment.
+    row = _pdf_row("Invoice No: INV-9\nTotal: Rs 1,000\nInvoice Date: 05/06/2026\nTerms: Net 30\n")
+    assert row["due_date"] == "2026-07-05"  # day-first base + 30 days
+    assert row["date_assumed"] is True
+    assert row["date_assumed_reason"] == "ambiguous-computed"
+
+
+def test_pdf_computed_due_on_unambiguous_base_stays_computed():
+    # 25/06/2026 can only read day-first: an ordinary computed estimate.
+    row = _pdf_row("Invoice No: INV-9\nTotal: Rs 1,000\nInvoice Date: 25/06/2026\nTerms: Net 30\n")
+    assert row["due_date"] == "2026-07-25"
+    assert row["date_assumed"] is True
+    assert row["date_assumed_reason"] == "computed"
+
+
+def test_pdf_computed_due_on_same_day_base_stays_computed():
+    # 07/07/2026 reads identically both ways: no ambiguity to surface.
+    row = _pdf_row("Invoice No: INV-9\nTotal: Rs 1,000\nInvoice Date: 07/07/2026\nTerms: Net 30\n")
+    assert row["due_date"] == "2026-08-06"
+    assert row["date_assumed"] is True
+    assert row["date_assumed_reason"] == "computed"

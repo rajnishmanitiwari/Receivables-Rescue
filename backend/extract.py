@@ -61,13 +61,20 @@ def _clean_name(s: str) -> str:
     return s[:120]
 
 
-def _first_date(text: str) -> date | None:
+def _first_date(text: str) -> tuple[date | None, bool]:
+    """First parseable date, plus whether its numeric form reads both
+    day-first and month-first (05/06/2026). Same-day numerics (07/07) read
+    identically both ways and are not ambiguous."""
     for token in re.split(r"[,\n]", text):
-        d = engine.parse_date(token.strip())
+        token = token.strip()
+        d = engine.parse_date(token)
         if d:
-            return d
+            num = re.search(r"\d{1,2}\s*[/.\-]\s*\d{1,2}\s*[/.\-]\s*\d{2,4}", token)
+            return d, bool(num and engine._numeric_date_form(num.group(0)) == "ambiguous")
     m = re.search(r"\d{1,4}[\s/.\-][A-Za-z0-9]{1,9}[\s/.\-]\d{2,4}", text)
-    return engine.parse_date(m.group(0)) if m else None
+    if m:
+        return engine.parse_date(m.group(0)), engine._numeric_date_form(m.group(0)) == "ambiguous"
+    return None, False
 
 
 def parse_invoice_text(text: str) -> dict[str, Any]:
@@ -88,17 +95,18 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
             break
 
     inv_date = None
+    base_ambiguous = False
     m = RE_INVDATE.search(text)
     if m:
-        inv_date = _first_date(m.group(1))
+        inv_date, base_ambiguous = _first_date(m.group(1))
     if inv_date is None:
         # Plenty of invoices just say "Date:". Fall back to that, then to the
         # first parseable date anywhere in the document.
         m = re.search(r"\bdate\b\s*[:\-]?\s*([^\n]{4,32})", text, re.I)
         if m:
-            inv_date = _first_date(m.group(1))
+            inv_date, base_ambiguous = _first_date(m.group(1))
     if inv_date is None:
-        inv_date = _first_date(text)
+        inv_date, base_ambiguous = _first_date(text)
 
     due = None
     m = RE_DUE.search(text)
@@ -116,7 +124,7 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
                 out["date_assumed"] = True
                 out["date_assumed_reason"] = "ambiguous"
         else:
-            due = _first_date(span)
+            due, _ = _first_date(span)
     if due is None and inv_date is not None:
         t = RE_TERMS.search(text)
         # Stated credit terms are honoured as written: "Net 60" means 60 days,
@@ -125,7 +133,10 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
         # screen asks the user to confirm it before it drives chasing.
         due = inv_date + timedelta(days=int(t.group(1)) if t else 45)
         out["date_assumed"] = True
-        out["date_assumed_reason"] = "computed"
+        # A base date like 05/06/2026 reads two ways, so a date computed from
+        # it can be a month off. That guess gets the same visibly unconfirmed
+        # treatment as an ambiguous stated date, not a plain "computed" note.
+        out["date_assumed_reason"] = "ambiguous-computed" if base_ambiguous else "computed"
     if due:
         out["due_date"] = due.isoformat()
         hits += 1

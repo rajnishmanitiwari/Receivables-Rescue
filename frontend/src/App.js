@@ -19,6 +19,11 @@ export function guessNotes(rows) {
   if (ambiguous) out.push(
     ambiguous + " date(s) like 05/06/2026 could be read day-first or month-first. Shown as a guess, " +
     "unconfirmed; those bills are not scheduled for chasing. Confirm or fix the dates where you review them.");
+  const ambComputed = rows.filter((r) => r.date_assumed && r.date_assumed_reason === "ambiguous-computed").length;
+  if (ambComputed) out.push(
+    ambComputed + " due date(s) were computed from an invoice date like 05/06/2026 that could be read day-first or " +
+    "month-first, so the estimate could be a month off. Shown as a guess, unconfirmed; those bills are not " +
+    "scheduled for chasing. Confirm or fix the dates where you review them.");
   const positional = rows.filter((r) => r.date_assumed && r.date_assumed_reason === "positional").length;
   if (positional) out.push(
     positional + " row(s) came without a header row, so the due date was read from an unlabelled column and " +

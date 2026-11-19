@@ -31,6 +31,14 @@ test("guessNotes counts only unconfirmed guessed dates, by reason", () => {
   const pos = guessNotes([{ ...AMBIGUOUS_ROW, date_assumed_reason: "positional" }]);
   expect(pos).toHaveLength(1);
   expect(pos[0]).toContain("without a header row");
+  // Dates computed from an ambiguous base get their own month-off warning.
+  const ac = guessNotes([{ ...AMBIGUOUS_ROW, date_assumed_reason: "ambiguous-computed" }]);
+  expect(ac).toHaveLength(1);
+  expect(ac[0]).toContain("computed from an invoice date");
+  expect(ac[0]).toContain("a month off");
+  expect(ac[0]).toContain("not scheduled for chasing");
+  // A confirmed ambiguous-computed guess no longer counts.
+  expect(guessNotes([{ ...AMBIGUOUS_ROW, date_assumed_reason: "ambiguous-computed", date_assumed: false }])).toEqual([]);
 });
 
 function mountApp(extractPayload) {
