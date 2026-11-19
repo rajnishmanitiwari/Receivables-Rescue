@@ -27,6 +27,12 @@ export function guessNotes(rows) {
   return out;
 }
 
+export function customerNotes(rows) {
+  const missing = rows.filter((r) => !String(r.customer || "").trim()).length;
+  if (!missing) return [];
+  return [missing + " bill(s) have no customer name. Type who owes you in the review table; we never guess it."];
+}
+
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 function money(n, cur = "INR") {
@@ -146,7 +152,7 @@ export function ReviewTable({ rows, setRows, currency }) {
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className={r.confidence === "low" ? "shaky" : ""}>
-                <td><input value={r.customer} onChange={(e) => update(i, "customer", e.target.value)} placeholder="Customer name" /></td>
+                <td><input className={String(r.customer || "").trim() ? undefined : "need"} value={r.customer} onChange={(e) => update(i, "customer", e.target.value)} placeholder="Customer name" /></td>
                 <td><input className="w-sm" value={r.invoice_no} onChange={(e) => update(i, "invoice_no", e.target.value)} placeholder="-" /></td>
                 <td><input className="w-sm num" inputMode="decimal" value={r.amount} onChange={(e) => update(i, "amount", e.target.value)} placeholder="0" /></td>
                 <td>
@@ -586,6 +592,11 @@ export default function App() {
   const run = useCallback(async () => {
     const clean = rows.filter((r) => Number(r.amount) > 0);
     if (!clean.length) { setError("Add at least one bill with an amount."); return; }
+    const missingCustomer = clean.filter((r) => !String(r.customer || "").trim()).length;
+    if (missingCustomer) {
+      setError(missingCustomer + " bill(s) have no customer name. Type who owes you in the review table; we never guess it.");
+      return;
+    }
     setBusy(true); setError(""); setResult(null);
     try {
       const unconfirmed = clean.filter((r) => r.date_assumed).length;
@@ -640,6 +651,10 @@ export default function App() {
       + " of it quietly disappears if I do nothing for 30 days. Free, no signup."
     : "";
 
+  // The missing-customer gate error retires as soon as every row has a name.
+  useEffect(() => {
+    if (error && error.includes("no customer name") && !customerNotes(rows).length) setError("");
+  }, [rows]);  // eslint-disable-line react-hooks/exhaustive-deps
   const reset = () => { setRows([]); setResult(null); setNotes([]); setError(""); };
 
   return (
@@ -695,7 +710,7 @@ export default function App() {
               <button type="button" className="btn ghost" onClick={usePaste} disabled={reading || !paste.trim()}>Add these</button>
             </div>
           ) : null}
-          {[...notes, ...guessNotes(rows)].length ? <div className="notes">{[...notes, ...guessNotes(rows)].map((n, i) => <div key={i}>{n}</div>)}</div> : null}
+          {[...notes, ...guessNotes(rows), ...customerNotes(rows)].length ? <div className="notes">{[...notes, ...guessNotes(rows), ...customerNotes(rows)].map((n, i) => <div key={i}>{n}</div>)}</div> : null}
           {!caps.vision && caps.upload !== false ? (
             <p className="cap-note">
               PDF bills are read automatically. Photos of paper bills need the AI reader turned on.

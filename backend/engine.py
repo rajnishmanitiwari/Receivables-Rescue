@@ -343,6 +343,7 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
     skipped = 0
     undated = 0
     ambiguous_guessed = 0
+    unnamed = 0
     for row in body[:MAX_INVOICES]:
         amount = parse_amount(cell(row, "amount"))
         if amount is None or amount <= 0:
@@ -368,7 +369,15 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
         if due is None:
             undated += 1
             date_source = ""
-        customer = cell(row, "customer") or "Unnamed customer"
+        customer = cell(row, "customer")
+        if not customer:
+            # Unknown means unknown: a blank customer is never replaced with a
+            # placeholder. "Unnamed customer" would merge distinct unknown
+            # debtors into one pseudo-customer, corrupting by-customer totals
+            # and combining their chase drafts, so the whole analysis is
+            # rejected below and the user names each bill first.
+            unnamed += 1
+            continue
         invoices.append(
             Invoice(
                 customer=customer[:120],
@@ -381,6 +390,12 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
             )
         )
 
+    if unnamed:
+        raise ParseError(
+            f"{unnamed} bill(s) have no customer name. Add who owes you for "
+            "each bill before analysing; an unknown debtor is never guessed, "
+            "grouped or chased."
+        )
     if len(body) > MAX_INVOICES:
         warnings.append(f"Only the first {MAX_INVOICES} rows were analysed.")
     if skipped:

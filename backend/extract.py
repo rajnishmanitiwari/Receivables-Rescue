@@ -47,7 +47,10 @@ RE_INVDATE = re.compile(r"(?:invoice\s*date|bill\s*date|date\s*of\s*issue|dated)
 RE_TOTAL = re.compile(
     r"(?:grand\s*total|total\s*payable|amount\s*payable|balance\s*due|amount\s*due|net\s*payable|total)"
     r"\s*[:\-]?\s*(?:rs\.?|inr|₹|\$|usd|€|£)?\s*([\d,.\s]{2,20})", re.I)
-RE_BILLTO = re.compile(r"(?:bill(?:ed)?\s*to|buyer|customer|sold\s*to|to)\s*[:\-]?\s*\n?\s*([^\n]{2,80})", re.I)
+RE_BILLTO = re.compile(r"\b(?:bill(?:ed)?\s*to|buyer|customer|sold\s*to|to)\b\s*[:\-]?\s*\n?\s*([^\n]{2,80})", re.I)
+# A captured "customer" can never contain a currency amount; money fragments
+# mean the label matched inside an unrelated word and the capture is garbage.
+_MONEY_IN_NAME = re.compile(r"(?:rs\.?|inr|₹|\$|usd|€|£)\s*\d", re.I)
 
 _JUNK_LINE = re.compile(r"^\s*(?:gstin|pan|state|address|phone|email|tel|mobile)\b", re.I)
 
@@ -145,22 +148,21 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
     m = RE_BILLTO.search(text)
     if m:
         cand = _clean_name(m.group(1))
-        if not cand or _JUNK_LINE.match(cand):
+        if not cand or _JUNK_LINE.match(cand) or _MONEY_IN_NAME.search(cand):
+            cand = ""
             after = text[m.end():].splitlines()
             for line in after[:4]:
                 c = _clean_name(line)
-                if c and not _JUNK_LINE.match(c):
+                if c and not _JUNK_LINE.match(c) and not _MONEY_IN_NAME.search(c):
                     cand = c
                     break
         if cand:
             out["customer"] = cand
             hits += 1
-    if not out["customer"]:
-        for line in text.splitlines():
-            c = _clean_name(line)
-            if len(c) > 3 and not _JUNK_LINE.match(c) and not re.search(r"invoice|tax|bill", c, re.I):
-                out["customer"] = c
-                break
+    # No bill-to label: customer stays empty. The header line is usually the
+    # seller, not the debtor, and a wrong debtor is worse than a blank one:
+    # the review step requires the user to type who owes them.
+
 
     m = RE_EMAIL.search(text)
     if m:

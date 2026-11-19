@@ -1,0 +1,50 @@
+"""Customer-name extraction must never return a money fragment.
+
+The label regex once matched the "to" inside "Total", so an invoice with no
+bill-to block yielded customer="tal: Rs 1,86,500". Labels are whole words
+now, and any candidate containing a currency amount is rejected.
+"""
+import extract
+
+
+def test_total_line_fragment_is_not_a_customer():
+    text = (
+        "Bluepeak Logistics\n"
+        "Invoice No: INV-2044\n"
+        "Invoice Date: 2026-05-01\n"
+        "Due Date: 05/06/2026\n"
+        "Total: Rs 1,86,500\n"
+        "Amount due: Rs 1,86,500\n"
+        "Please pay by the due date above. Thank you for your business.\n"
+    )
+    got = extract.parse_invoice_text(text)
+    assert "1,86,500" not in got["customer"] and "tal:" not in got["customer"], got
+    # No bill-to block: the customer stays empty rather than offering the
+    # seller's header line as a plausible-but-wrong debtor. The review step
+    # requires the user to type the name.
+    assert got["customer"] == "", got
+
+
+def test_real_bill_to_still_wins_over_total_line():
+    text = "TOTAL: Rs 5,000\nBill To: Acme Traders\nTotal: Rs 5,000"
+    assert extract.parse_invoice_text(text)["customer"] == "Acme Traders"
+
+
+def test_label_with_amount_capture_falls_through_to_next_line():
+    text = "To: Rs 5,000 only\nAcme Traders\nTotal: Rs 5,000"
+    assert extract.parse_invoice_text(text)["customer"] == "Acme Traders"
+
+
+def test_net_total_does_not_shadow_customer_label():
+    text = "Net Total: Rs 1,000\nCustomer: Sharma Textiles"
+    assert extract.parse_invoice_text(text)["customer"] == "Sharma Textiles"
+
+
+def test_sold_to_multiline_still_matches():
+    text = "Sold To:\nKapoor Garments LLP\nTotal 2,02,125"
+    assert extract.parse_invoice_text(text)["customer"] == "Kapoor Garments LLP"
+
+
+def test_no_label_means_no_customer():
+    got = extract.parse_invoice_text("Acme Traders\nThank you for your business.\nTotal: Rs 500")
+    assert got["customer"] == "", got
