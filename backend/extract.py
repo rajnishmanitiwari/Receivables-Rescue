@@ -47,7 +47,14 @@ RE_INVDATE = re.compile(r"(?:invoice\s*date|bill\s*date|date\s*of\s*issue|dated)
 RE_TOTAL = re.compile(
     r"(?:grand\s*total|total\s*payable|amount\s*payable|balance\s*due|amount\s*due|net\s*payable|total)"
     r"\s*[:\-]?\s*(?:rs\.?|inr|₹|\$|usd|€|£)?\s*([\d,.\s]{2,20})", re.I)
-RE_BILLTO = re.compile(r"\b(?:bill(?:ed)?\s*to|buyer|customer|sold\s*to|to)\b\s*[:\-]?\s*\n?\s*([^\n]{2,80})", re.I)
+# Only an explicit billing-party label at line start establishes a debtor.
+# Bare "To" also occurs in shipping/remittance blocks, and mid-sentence
+# billing words can name someone other than the debtor. Keep those blank.
+# Labels must end at a delimiter or line break, not continue as prose.
+# Horizontal label spacing must not accidentally span separate text lines.
+RE_BILLTO = re.compile(
+    r"^[ \t]*(?:bill(?:ed)?[ \t]*to|buyer|customer|sold[ \t]*to)\b"
+    r"[ \t]*(?:[:\-][ \t]*\n?[ \t]*|\n[ \t]*)([^\n]{2,80})", re.I | re.M)
 # A captured "customer" can never contain a currency amount; money fragments
 # mean the label matched inside an unrelated word and the capture is garbage.
 _MONEY_IN_NAME = re.compile(r"(?:rs\.?|inr|₹|\$|usd|€|£)\s*\d", re.I)
