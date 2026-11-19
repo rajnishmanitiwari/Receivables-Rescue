@@ -6,7 +6,26 @@ import SAMPLE_ROWS from "./sample";
 const API = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
 const SYMBOLS = { INR: "₹", USD: "$", EUR: "€", GBP: "£", AED: "AED " };
 const TIER_CLASS = { reminder: "t-ok", firm: "t-warn", escalation: "t-hot", final: "t-crit" };
-const BLANK = { customer: "", invoice_no: "", amount: "", due_date: "", email: "", phone: "", confidence: "manual" };
+const BLANK = { customer: "", invoice_no: "", amount: "", due_date: "", email: "", phone: "", confidence: "manual", date_assumed: false, date_assumed_reason: "" };
+
+// Import notes about guessed dates are derived live from the rows, not kept
+// as static strings: once a row is confirmed the note must not keep saying
+// its bill is unscheduled while a chase draft sits below.
+const GUESS_NOTE_MARKERS = ["could be read day-first or month-first", "unlabelled column and is unconfirmed"];
+
+export function guessNotes(rows) {
+  const out = [];
+  const ambiguous = rows.filter((r) => r.date_assumed && r.date_assumed_reason === "ambiguous").length;
+  if (ambiguous) out.push(
+    ambiguous + " date(s) like 05/06/2026 could be read day-first or month-first. Shown as a guess, " +
+    "unconfirmed; those bills are not scheduled for chasing. Confirm or fix the dates where you review them.");
+  const positional = rows.filter((r) => r.date_assumed && r.date_assumed_reason === "positional").length;
+  if (positional) out.push(
+    positional + " row(s) came without a header row, so the due date was read from an unlabelled column and " +
+    "is unconfirmed. Those rows are not scheduled for chasing. Confirm or fix the dates where you review " +
+    "them, or add a header row naming the due date column.");
+  return out;
+}
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -543,7 +562,10 @@ export default function App() {
       if (!res.ok) throw new Error(json.detail || "Those files could not be read.");
       const got = (json.rows || []).map((r) => ({ ...BLANK, ...r, amount: r.amount == null ? "" : r.amount, due_date: r.due_date || "" }));
       setRows((prev) => [...prev, ...got]);
-      setNotes(json.notes || []);
+      // Guessed-date notes are derived from the live rows (see guessNotes);
+      // keeping the static strings would leave a stale "not scheduled"
+      // warning after the user confirms the date.
+      setNotes((json.notes || []).filter((n) => !GUESS_NOTE_MARKERS.some((m) => n.includes(m))));
       if (!got.length && !(json.notes || []).length) setNotes(["Nothing readable was found in those files."]);
       if (got.length && reviewRef.current) setTimeout(() => reviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
     } catch (err) {
@@ -673,7 +695,7 @@ export default function App() {
               <button type="button" className="btn ghost" onClick={usePaste} disabled={reading || !paste.trim()}>Add these</button>
             </div>
           ) : null}
-          {notes.length ? <div className="notes">{notes.map((n, i) => <div key={i}>{n}</div>)}</div> : null}
+          {[...notes, ...guessNotes(rows)].length ? <div className="notes">{[...notes, ...guessNotes(rows)].map((n, i) => <div key={i}>{n}</div>)}</div> : null}
           {!caps.vision && caps.upload !== false ? (
             <p className="cap-note">
               PDF bills are read automatically. Photos of paper bills need the AI reader turned on

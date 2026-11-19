@@ -128,6 +128,12 @@ _DATE_FORMATS = (
     "%d/%m/%y", "%d-%m-%y", "%m/%d/%y", "%Y-%m-%d %H:%M:%S",
 )
 
+# Numeric dates split by convention. A date like 05/06/2026 matches both
+# families: only the reader knows which way the file was written.
+_DMY_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d/%m/%y", "%d-%m-%y")
+_MDY_FORMATS = ("%m/%d/%Y", "%m/%d/%y")
+_NUMERIC_DATE_RE = re.compile(r"^(\d{1,2})([/.\-])(\d{1,2})\2(\d{2}|\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$")
+
 
 def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9 ]+", " ", str(s or "").strip().lower()).strip()
@@ -200,6 +206,39 @@ def parse_date(raw: Any) -> date | None:
     return None
 
 
+def _numeric_date_form(raw: Any) -> str:
+    """Classify a numeric date cell: "dmy" or "mdy" when only one convention
+    can read it, "ambiguous" when both can read it DIFFERENTLY, "" when it
+    is not a numeric day/month/year-shaped value (ISO, month names, blank,
+    unparseable). Same-day numerics (07/07/2026) read identically both ways,
+    so they are not ambiguous."""
+    if raw is None or isinstance(raw, date):
+        return ""
+    s = re.sub(r"\s+", " ", str(raw).strip().replace(",", " ")).strip()
+    m = _NUMERIC_DATE_RE.match(s)
+    if not m:
+        return ""
+    a, b = int(m.group(1)), int(m.group(3))
+    if a > 12 and b <= 12:
+        return "dmy"
+    if b > 12 and a <= 12:
+        return "mdy"
+    if 1 <= a <= 12 and 1 <= b <= 12 and a != b:
+        return "ambiguous"
+    return ""
+
+
+def _parse_numeric_convention(raw: Any, convention: str) -> date | None:
+    """Parse a numeric date under one convention only ("dmy" or "mdy")."""
+    s = re.sub(r"\s+", " ", str(raw or "").strip().replace(",", " ")).strip()
+    for fmt in (_DMY_FORMATS if convention == "dmy" else _MDY_FORMATS):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 @dataclass
 class Invoice:
     customer: str
@@ -209,8 +248,10 @@ class Invoice:
     email: str = ""
     phone: str = ""
     # Where the due date came from: "column" (a named due-date column, which the
-    # caller's own header confirms) or "positional" (an unlabelled column in
-    # headerless input - an assumption, not a confirmed due date). "" when none.
+    # caller's own header confirms), "positional" (an unlabelled column in
+    # headerless input - an assumption, not a confirmed due date) or "ambiguous"
+    # (a numeric date readable day-first or month-first - kept as a visible
+    # guess, never a confirmed due date). "" when none.
     date_source: str = ""
     # derived
     days_overdue: int = 0
@@ -280,9 +321,28 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
             return ""
         return str(row[idx]).strip()
 
+    # A numeric date like 05/06/2026 reads as 5 June day-first or 6 May
+    # month-first. One unambiguous row elsewhere in the column does not prove
+    # how another person typed the ambiguous rows, so inference never
+    # confirms them: every ambiguous date stays unconfirmed. The column scan
+    # only picks which reading to SHOW as the guess (day-first by default;
+    # the column's proven direction when one exists) and how the warning
+    # explains it. A column containing BOTH conventions is flagged mixed.
+    column_convention = ""
+    if not positional_mode and "due_date" in header_map:
+        forms = {_numeric_date_form(cell(r, "due_date")) for r in body[:MAX_INVOICES]}
+        if "dmy" in forms and "mdy" in forms:
+            column_convention = "mixed"
+        elif "dmy" in forms:
+            column_convention = "dmy"
+        elif "mdy" in forms:
+            column_convention = "mdy"
+    guess_convention = column_convention if column_convention in ("dmy", "mdy") else "dmy"
+
     invoices: list[Invoice] = []
     skipped = 0
     undated = 0
+    ambiguous_guessed = 0
     for row in body[:MAX_INVOICES]:
         amount = parse_amount(cell(row, "amount"))
         if amount is None or amount <= 0:
@@ -291,14 +351,23 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
         # Only an explicit due-date column sets the due date. An invoice date
         # is when the bill was issued, never when payment is due; rows without
         # a confirmed due date stay unscheduled (analyse keeps them neutral).
-        due = parse_date(cell(row, "due_date"))
+        raw_due = cell(row, "due_date")
+        due: date | None = None
+        if _numeric_date_form(raw_due) == "ambiguous" and not positional_mode:
+            # Readable two ways and inference never confirms: keep the guess
+            # visible for the review screen, but unconfirmed - it never
+            # drives totals, tiers or chase drafts until the user confirms.
+            due = _parse_numeric_convention(raw_due, guess_convention)
+            if due is not None:
+                date_source = "ambiguous"
+                ambiguous_guessed += 1
+        else:
+            due = parse_date(raw_due)
+            if due is not None:
+                date_source = "positional" if positional_mode else "column"
         if due is None:
             undated += 1
             date_source = ""
-        elif positional_mode:
-            date_source = "positional"
-        else:
-            date_source = "column"
         customer = cell(row, "customer") or "Unnamed customer"
         invoices.append(
             Invoice(
@@ -330,6 +399,19 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
         warnings.append(
             f"{undated} invoice(s) had no readable due date. Their lateness is unknown "
             "and they are not scheduled for chasing. Add due dates to include them."
+        )
+    if ambiguous_guessed:
+        shown = "day-first" if guess_convention == "dmy" else "month-first"
+        if column_convention == "mixed":
+            why = "this column contains BOTH date formats, so there is no safe reading"
+        elif column_convention:
+            why = f"matching the rest of the column, but still only a guess"
+        else:
+            why = "no other date in the column settles which"
+        warnings.append(
+            f"{ambiguous_guessed} date(s) like 05/06/2026 could be read day-first or "
+            f"month-first ({why}). Shown {shown}, unconfirmed; those bills are not "
+            "scheduled for chasing. Confirm or fix the dates where you review them."
         )
     # Duplicate and conflicting bills. A bill number is the bill's identity -
     # but only a REAL one: placeholder strings ("N/A", "-", "no") mean "no

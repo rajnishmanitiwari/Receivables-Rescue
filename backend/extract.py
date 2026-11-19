@@ -71,7 +71,7 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
     """Pull invoice fields out of a text layer. Returns whatever it is confident about."""
     out: dict[str, Any] = {"customer": "", "invoice_no": "", "amount": None,
                            "due_date": None, "email": "", "phone": "", "confidence": "low",
-                           "date_assumed": False}
+                           "date_assumed": False, "date_assumed_reason": ""}
     if not text or not text.strip():
         return out
 
@@ -100,7 +100,20 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
     due = None
     m = RE_DUE.search(text)
     if m:
-        due = _first_date(m.group(1))
+        span = m.group(1)
+        # Same contract as the CSV path: a stated due date like 05/06/2026 in
+        # a single document has nothing to settle day-first vs month-first,
+        # and inference never confirms. It is kept as a visible day-first
+        # guess held for confirmation. Same-day numerics (07/07/2026) read
+        # identically both ways and stay confirmed.
+        token = re.search(r"\d{1,2}\s*[/.\-]\s*\d{1,2}\s*[/.\-]\s*\d{2,4}", span)
+        if token and engine._numeric_date_form(token.group(0)) == "ambiguous":
+            due = engine._parse_numeric_convention(token.group(0), "dmy")
+            if due:
+                out["date_assumed"] = True
+                out["date_assumed_reason"] = "ambiguous"
+        else:
+            due = _first_date(span)
     if due is None and inv_date is not None:
         t = RE_TERMS.search(text)
         # Stated credit terms are honoured as written: "Net 60" means 60 days,
@@ -109,6 +122,7 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
         # screen asks the user to confirm it before it drives chasing.
         due = inv_date + timedelta(days=int(t.group(1)) if t else 45)
         out["date_assumed"] = True
+        out["date_assumed_reason"] = "computed"
     if due:
         out["due_date"] = due.isoformat()
         hits += 1
@@ -241,7 +255,12 @@ async def extract_file(filename: str, blob: bytes) -> dict[str, Any]:
         return {"rows": [{
             "customer": i.customer, "invoice_no": i.invoice_no, "amount": i.amount,
             "due_date": i.due_date.isoformat() if i.due_date else None,
-            "date_assumed": i.date_source == "positional",
+            # Positional and ambiguous-format dates are both guesses the user
+            # must confirm before they drive chasing. The reason lets the
+            # review screen explain each guess accurately and drop the
+            # explanation once that row is confirmed.
+            "date_assumed": i.date_source in ("positional", "ambiguous"),
+            "date_assumed_reason": i.date_source if i.date_source in ("positional", "ambiguous") else "",
             "email": i.email, "phone": i.phone, "confidence": "high",
         } for i in invoices], "note": "; ".join(warnings)}
 
