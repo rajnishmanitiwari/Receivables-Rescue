@@ -17,11 +17,11 @@ All API routes are under `/api`, so ingress can route `/api/*` to the backend.
 
 ## Vercel
 
-**Backend project** — Root Directory = `backend`. `backend/vercel.json` +
+**Backend project**: Root Directory = `backend`. `backend/vercel.json` +
 `backend/api/index.py` run the FastAPI app as a serverless function. No env
 vars are required (Mongo and the LLM key are optional).
 
-**Frontend project** — Root Directory = repo root (uses `vercel.json` here) or
+**Frontend project**: Root Directory = repo root (uses `vercel.json` here) or
 `frontend/`. Add one env var:
 
 ```
@@ -33,7 +33,7 @@ Redeploy the frontend after setting it (CRA inlines env vars at build time).
 ## Environment variables
 
 See `backend/.env.example` and `frontend/.env.example`. Everything on the
-backend is optional — the app is fully functional with nothing set.
+backend is optional. The app is fully functional with nothing set.
 
 ## Dependencies added for invoice reading (2026-08-28)
 
@@ -44,7 +44,7 @@ backend is optional — the app is fully functional with nothing set.
 | `python-multipart==0.0.20` | FastAPI needs it for `UploadFile` | `POST /api/extract` is not registered; the rest of the API is unaffected and the UI falls back to the paste box. `GET /api/health` reports `upload:false`. |
 | `pymupdf==1.25.2` | Reads the text layer out of PDF invoices | PDF reading is skipped; `GET /api/health` reports `pdf:false`. CSV and pasted rows still work. |
 
-Neither needs a system package on Linux — both ship manylinux wheels, so
+Neither needs a system package on Linux. Both ship manylinux wheels, so
 `.emergent/system_deps.txt` is unchanged.
 
 `frontend/package.json` gained `@fontsource/source-serif-4` and
@@ -56,7 +56,7 @@ been regenerated, so `npm ci`, `npm install` and `yarn install` all resolve.
 
 `POST /api/extract` accepts files up to **4 MB each**, which keeps requests
 inside Vercel's 4.5 MB serverless body cap. On a container host (Emergent,
-Railway, Render) there is no such cap — raise it with:
+Railway, Render) there is no such cap. Raise it with:
 
 ```
 MAX_UPLOAD_MB=12

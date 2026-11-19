@@ -285,7 +285,7 @@ def _register_upload_route() -> bool:
 async def extract_files(files: list[UploadFile] = File(...)):
     """Read invoices out of PDFs, photos or spreadsheets.
 
-    Always returns rows for the user to review and correct — extraction is a
+    Always returns rows for the user to review and correct. Extraction is a
     starting point, never the final word.
     """
     if not files:

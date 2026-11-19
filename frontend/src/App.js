@@ -147,14 +147,14 @@ export function ReviewTable({ rows, setRows, currency }) {
             {rows.map((r, i) => (
               <tr key={i} className={r.confidence === "low" ? "shaky" : ""}>
                 <td><input value={r.customer} onChange={(e) => update(i, "customer", e.target.value)} placeholder="Customer name" /></td>
-                <td><input className="w-sm" value={r.invoice_no} onChange={(e) => update(i, "invoice_no", e.target.value)} placeholder="—" /></td>
+                <td><input className="w-sm" value={r.invoice_no} onChange={(e) => update(i, "invoice_no", e.target.value)} placeholder="-" /></td>
                 <td><input className="w-sm num" inputMode="decimal" value={r.amount} onChange={(e) => update(i, "amount", e.target.value)} placeholder="0" /></td>
                 <td>
                   <input className="w-md" type="date" value={r.due_date || ""} onChange={(e) => update(i, "due_date", e.target.value)} />
                   {r.date_assumed ? <button type="button" className="assumed" onClick={() => update(i, "date_assumed", false)}>We estimated this date. Tap to confirm, or fix it.</button> : null}
                 </td>
-                <td><input value={r.email} onChange={(e) => update(i, "email", e.target.value)} placeholder="—" /></td>
-                <td><input className="w-md" value={r.phone} onChange={(e) => update(i, "phone", e.target.value)} placeholder="—" /></td>
+                <td><input value={r.email} onChange={(e) => update(i, "email", e.target.value)} placeholder="-" /></td>
+                <td><input className="w-md" value={r.phone} onChange={(e) => update(i, "phone", e.target.value)} placeholder="-" /></td>
                 <td><button type="button" className="x" onClick={() => remove(i)} aria-label={"Remove row " + (i + 1)}>&times;</button></td>
               </tr>
             ))}
@@ -305,7 +305,7 @@ export function FollowUp({ m, sender, company, currency, onDecision }) {
     <div className="followup">
       <div className="fu-head">
         <strong>What happened since?</strong>
-        <span className="hint">A fixed set of rules suggests the next step. This session only — nothing is saved, and nothing is sent for you.</span>
+        <span className="hint">A fixed set of rules suggests the next step. This session only: nothing is saved, and nothing is sent for you.</span>
       </div>
       <div className="fu-actions">
         <button type="button" className="btn ghost sm" disabled={busy}
@@ -347,7 +347,7 @@ export function FollowUp({ m, sender, company, currency, onDecision }) {
         <div className={"fu-decision"}>
           <span className={"tier " + present.cls}>{present.label}{decision.tier && decision.kind === "draft" ? ": " + decision.tier : ""}</span>
           <span className="fu-reason">
-            {decision.reason}{decision.until ? " — until " + decision.until : ""}
+            {decision.reason}{decision.until ? ", until " + decision.until : ""}
           </span>
         </div>
       ) : null}
@@ -401,7 +401,7 @@ export function FollowUp({ m, sender, company, currency, onDecision }) {
           <span className="fu-suggest-text">
             We read “{sug.phrase}” as <strong>{sug.date}</strong>, assuming the reply was
             received {sug.reply_day} (the date you logged). Nothing changes until you
-            confirm — you can also pick another date.
+            confirm. You can also pick another date.
           </span>
           <span className="fu-suggest-actions">
             <button type="button" className="btn primary sm" disabled={busy || !sugReply}
@@ -666,7 +666,7 @@ export default function App() {
           {caps.upload === false ? (
             <div className="upload-off">
               <strong>File uploads are unavailable on this server right now.</strong>
-              <span>Type or paste your bills below instead — everything else works normally.</span>
+              <span>Type or paste your bills below instead. Everything else works normally.</span>
             </div>
           ) : (
             <Drop onFiles={addFiles} busy={reading} />
@@ -698,8 +698,8 @@ export default function App() {
           {[...notes, ...guessNotes(rows)].length ? <div className="notes">{[...notes, ...guessNotes(rows)].map((n, i) => <div key={i}>{n}</div>)}</div> : null}
           {!caps.vision && caps.upload !== false ? (
             <p className="cap-note">
-              PDF bills are read automatically. Photos of paper bills need the AI reader turned on
-              — until then, type those in or paste them.
+              PDF bills are read automatically. Photos of paper bills need the AI reader turned on.
+              Until then, type those in or paste them.
             </p>
           ) : null}
         </section>
@@ -840,7 +840,7 @@ export default function App() {
                         <td>{c.customer}</td>
                         <td className="r">{money(c.amount, currency)}</td>
                         <td className="r">{c.count}</td>
-                        <td className="r">{c.oldest_days > 0 ? c.oldest_days + "d" : "—"}</td>
+                        <td className="r">{c.oldest_days > 0 ? c.oldest_days + "d" : "-"}</td>
                         <td className="r">{c.share}%</td>
                       </tr>
                     ))}

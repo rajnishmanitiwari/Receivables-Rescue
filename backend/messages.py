@@ -3,7 +3,7 @@ Escalating follow-up generator.
 
 Works with zero API keys (deterministic templates below). If an LLM key is
 configured, backend/llm.py rewrites the same messages in the user's chosen
-tone/language — the app never depends on that being available.
+tone/language. The app never depends on that being available.
 """
 from __future__ import annotations
 
@@ -52,10 +52,10 @@ def _subject(tier: str, inv: dict[str, Any], currency: str) -> str:
     amt = fmt_money(inv["amount"], currency)
     days = inv["days_overdue"]
     return {
-        "reminder": f"{ref} — {amt} due{' in ' + str(-days) + ' days' if days < 0 else ' now'}",
-        "firm": f"Overdue: {ref} — {amt}, {days} days past due",
+        "reminder": f"{ref}: {amt} due{' in ' + str(-days) + ' days' if days < 0 else ' now'}",
+        "firm": f"Overdue: {ref}, {amt}, {days} days past due",
         "escalation": f"Action needed: {ref} unpaid for {days} days ({amt})",
-        "final": f"Final notice — {ref}, {amt}, {days} days overdue",
+        "final": f"Final notice: {ref}, {amt}, {days} days overdue",
     }[tier]
 
 
@@ -71,7 +71,7 @@ def _email_body(tier: str, inv: dict[str, Any], sender: str, company: str, curre
         body = (
             f"Hi {name},\n\n"
             f"Quick note that {ref} for {amt} is due on {due}. "
-            "I am sure it is already in the queue — this is just so it does not slip.\n\n"
+            "I am sure it is already in the queue. This is just so it does not slip.\n\n"
             "If you need the invoice re-sent or a PO number added, tell me and I will "
             "turn it around today.\n\n"
             f"Thanks,\n{sign}"
@@ -113,7 +113,7 @@ def _whatsapp(tier: str, inv: dict[str, Any], sender: str, company: str, currenc
     ref = inv.get("invoice_no") or "the invoice"
     amt = fmt_money(inv["amount"], currency)
     days = inv["days_overdue"]
-    tail = f"— {sender}, {company}".strip(" ,-")
+    tail = f"{sender}, {company}".strip(" ,")
     core = {
         "reminder": f"Hi {name}, quick reminder that {ref} ({amt}) is due. Anything you need from me to release it?",
         "firm": f"Hi {name}, {ref} ({amt}) is {days} days past due. Can you give me a payment date today?",

@@ -1,5 +1,5 @@
 """
-Turn an uploaded invoice into rows — without requiring an API key.
+Turn an uploaded invoice into rows without requiring an API key.
 
 Order of attack, cheapest first:
   1. PDF text layer + deterministic field patterns.  Free, instant, no network.
@@ -37,7 +37,7 @@ RE_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 RE_PHONE = re.compile(r"(?:\+?\d{1,3}[\s-]?)?(?:\(?\d{2,5}\)?[\s-]?)?\d{5}[\s-]?\d{5}|\+?\d{10,13}")
 RE_GSTIN = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]\b")
 # The label must be on the same line as the value, and the value must contain a
-# digit — otherwise "TAX INVOICE\nSharma Textiles" reads as invoice number "Sharma".
+# digit, otherwise "TAX INVOICE\nSharma Textiles" reads as invoice number "Sharma".
 RE_INV_NO = re.compile(
     r"(?:invoice|inv|bill|document)[ \t]*(?:no\.?|number|#|id)[ \t]*[:#\-]?[ \t]*"
     r"([A-Za-z0-9][A-Za-z0-9/\-_]{2,28})", re.I)
@@ -244,7 +244,7 @@ async def extract_file(filename: str, blob: bytes) -> dict[str, Any]:
     if len(blob) > MAX_BYTES:
         return {"rows": [], "note": (
             f"{filename} is too large. Keep each file under "
-            f"{MAX_BYTES // (1024 * 1024)} MB — a phone photo at normal quality is fine.")}
+            f"{MAX_BYTES // (1024 * 1024)} MB. A phone photo at normal quality is fine.")}
     name = (filename or "file").lower()
 
     if name.endswith((".csv", ".tsv", ".txt")):

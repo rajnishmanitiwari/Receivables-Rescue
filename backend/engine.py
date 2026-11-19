@@ -1,5 +1,5 @@
 """
-Receivables Rescue — deterministic collections engine.
+Receivables Rescue: deterministic collections engine.
 
 No LLM required. Every number below is arithmetic on the user's own invoice
 data plus a published-style aging recovery curve. We are explicit that the
@@ -612,7 +612,7 @@ def analyse(invoices: list[Invoice], today: date | None = None,
     if old_amt > 0 and total:
         risks.append(
             f"{round(old_amt / total * 100)}% of your book is past 90 days, where the generic aging "
-            "heuristic assumes collection odds fall sharply (not validated on your customers). Chase or decide — do not drift."
+            "heuristic assumes collection odds fall sharply (not validated on your customers). Chase or decide. Do not drift."
         )
     if unconfirmed:
         risks.append(
@@ -626,7 +626,7 @@ def analyse(invoices: list[Invoice], today: date | None = None,
     if no_contact:
         risks.append(
             f"{no_contact} invoice(s) have no email or phone on file. "
-            "You cannot chase what you cannot reach — fix your master data first."
+            "You cannot chase what you cannot reach. Fix your master data first."
         )
 
     return {

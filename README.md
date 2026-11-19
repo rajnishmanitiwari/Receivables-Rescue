@@ -2,7 +2,7 @@
 
 **Find the money your business is already owed.** Live at https://duerise.vercel.app (the older receivables-rescue.vercel.app address still works; the repo keeps its original name).
 
-Add your unpaid bills — as a PDF, a spreadsheet, or typed in. In one pass you get:
+Add your unpaid bills as a PDF, a spreadsheet, or typed in. In one pass you get:
 
 - how much is realistically collectable vs. already lost,
 - how late each bill is, with the oldest and largest surfaced,
@@ -23,11 +23,11 @@ Built for a small-business owner who is not technical, on a phone, in a hurry.
 2. **Three visible steps**: add → check → act. You always know where you are.
 3. **Nothing is trusted silently.** Whatever is read out of a file is shown in an
    editable table for review before any number is used.
-4. **Plain words.** "Who owes you", "was due on", "12 days late" — not
+4. **Plain words.** "Who owes you", "was due on", "12 days late", not
    "receivables ageing" or "DSO".
 5. **It works with no API keys.** AI is an upgrade, never a dependency.
 
-Type: Instrument Serif headings, Manrope body — both bundled as woff2 in the
+Type: Instrument Serif headings, Manrope body, both bundled as woff2 in the
 repo, not fetched from a CDN, so the app renders correctly on networks that
 block font CDNs. Palette: warm off-white `#fffdf8` / green `#16a34a` /
 ink `#1c1917` / muted `#7d7469`.
@@ -38,20 +38,20 @@ ink `#1c1917` / muted `#7d7469`.
 |----------|---------------------------------------------|
 | Frontend | React 18 (react-scripts 5), plain CSS       |
 | Backend  | FastAPI + Uvicorn (Python 3.11), PyMuPDF    |
-| Store    | MongoDB — anonymous aggregate counter only  |
+| Store    | MongoDB, anonymous aggregate counter only   |
 
 Backend routes are prefixed `/api` for platform ingress.
 Frontend reads `process.env.REACT_APP_BACKEND_URL`.
 
 ## What works without any API key
 
-- **PDF invoices with a text layer** — read by deterministic pattern matching in
+- **PDF invoices with a text layer**: read by deterministic pattern matching in
   `backend/extract.py`. Handles Indian and US date and number formats, `Net 30`
   style terms, `Bill To` / `Buyer` blocks, GSTIN, email and phone.
-- **CSV / TSV / pasted rows** — flexible header matching, no fixed column order.
-- **Every calculation** — ageing, recovery curve, cost of waiting, concentration
+- **CSV / TSV / pasted rows**: flexible header matching, no fixed column order.
+- **Every calculation**: ageing, recovery curve, cost of waiting, concentration
   risk.
-- **Every follow-up message** — built from templates, tiered by how late the bill is.
+- **Every follow-up message**: built from templates, tiered by how late the bill is.
 
 ## What the optional AI key adds
 
@@ -126,10 +126,10 @@ slip_30d = amount x ( P(collect today) - P(collect in 30 days) )
 ```
 
 This surfaces mid-age bills sitting just above the 90-day collectability cliff,
-which is where money actually leaks — not the oldest bills, which are largely
+which is where money actually leaks, not the oldest bills, which are largely
 already lost. Bills that are not yet due always rank below ones that are.
 
-**MSMED statutory interest — currently disabled.** An experimental MSMED Act
+**MSMED statutory interest: currently disabled.** An experimental MSMED Act
 late-payment interest estimate exists in the codebase but is switched off
 (`ENABLE_MSMED_INTEREST` unset) until its applicability and formula are verified.
 The UI shows no interest figures while it is off, and no interest clause is added
