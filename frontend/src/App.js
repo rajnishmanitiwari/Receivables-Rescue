@@ -561,6 +561,13 @@ export default function App() {
   const analysisKey = JSON.stringify([rows, currency, sender, company]);
   const result = resultSnapshot && resultSnapshot.key === analysisKey ? resultSnapshot.value : null;
   const analysisRequest = useRef(0);
+  // Reset/example start a new import session. Concurrent deliberate uploads
+  // in one session remain additive, but abandoned completions own nothing.
+  const importSession = useRef({ epoch: 0, pending: 0 });
+  const abandonImports = () => {
+    importSession.current = { epoch: importSession.current.epoch + 1, pending: 0 };
+    setReading(false);
+  };
   useEffect(() => {
     // Edits cancel ownership of pending responses, not just visible output.
     analysisRequest.current += 1;
@@ -587,6 +594,8 @@ export default function App() {
 
   const addFiles = useCallback(async (files) => {
     if (!files.length) return;
+    const session = importSession.current;
+    session.pending += 1;
     analysisRequest.current += 1;
     setBusy(false);
     setReading(true); setError(""); setResult(null);
@@ -595,6 +604,7 @@ export default function App() {
     try {
       const res = await fetch(API + "/api/extract", { method: "POST", body: fd });
       const json = await res.json().catch(() => ({}));
+      if (session !== importSession.current) return;
       if (!res.ok) throw new Error(json.detail || "Those files could not be read.");
       const got = (json.rows || []).map((r) => {
         // Source fallback also gates document rows during a rolling API update.
@@ -608,20 +618,26 @@ export default function App() {
       // warning after the user confirms the date.
       setNotes((json.notes || []).filter((n) => !GUESS_NOTE_MARKERS.some((m) => n.includes(m))));
       if (!got.length && !(json.notes || []).length) setNotes(["Nothing readable was found in those files."]);
-      if (got.length && reviewRef.current) setTimeout(() => reviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+      if (got.length && reviewRef.current) setTimeout(() => {
+        if (session === importSession.current && reviewRef.current) reviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 120);
     } catch (err) {
-      setError(err.message || "Those files could not be read.");
+      if (session === importSession.current) setError(err.message || "Those files could not be read.");
     } finally {
-      setReading(false);
+      if (session === importSession.current) {
+        session.pending -= 1;
+        setReading(session.pending > 0);
+      }
     }
   }, []);
 
   const usePaste = async () => {
     if (!paste.trim()) return;
+    const session = importSession.current;
     setReading(true); setError("");
     const blob = new Blob([paste], { type: "text/csv" });
     await addFiles([new File([blob], "pasted.csv", { type: "text/csv" })]);
-    setPaste(""); setShowPaste(false);
+    if (session === importSession.current) { setPaste(""); setShowPaste(false); }
   };
 
   const run = useCallback(async () => {
@@ -697,7 +713,7 @@ export default function App() {
     if (error && error.startsWith("Check and confirm the name and contacts") && !rows.some((r) => Number(r.amount) > 0 && r.recipient_unconfirmed)) setError("");
     if (rows.some((r) => r.recipient_unconfirmed)) setResult(null);
   }, [rows]);  // eslint-disable-line react-hooks/exhaustive-deps
-  const reset = () => { analysisRequest.current += 1; setBusy(false); setRows([]); setResult(null); setNotes([]); setError(""); };
+  const reset = () => { abandonImports(); analysisRequest.current += 1; setBusy(false); setRows([]); setResult(null); setNotes([]); setError(""); };
 
   return (
     <div className="page">
@@ -735,7 +751,7 @@ export default function App() {
             {rows.length ? null : (
               <>
                 <span className="sep" aria-hidden="true">&middot;</span>
-                <button type="button" className="btn link" onClick={() => { analysisRequest.current += 1; setBusy(false); setRows(SAMPLE_ROWS.map((r) => ({ ...BLANK, ...r }))); setNotes([]); setResult(null); }}>
+                <button type="button" className="btn link" onClick={() => { abandonImports(); analysisRequest.current += 1; setBusy(false); setRows(SAMPLE_ROWS.map((r) => ({ ...BLANK, ...r }))); setNotes([]); setResult(null); }}>
                   Try it with example bills
                 </button>
               </>
