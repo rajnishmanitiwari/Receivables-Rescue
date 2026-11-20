@@ -220,7 +220,7 @@ const KIND_PRESENT = {
   none:       { label: "Nothing to do",    cls: "t-ok" },
 };
 
-export function FollowUp({ m, sender, company, currency, onDecision }) {
+export function FollowUp({ m, sender, company, currency, onDecision, onPlanState }) {
   const [events, setEvents] = useState([]);
   const [decision, setDecision] = useState(null);
   const [replyOpen, setReplyOpen] = useState(false);
@@ -242,7 +242,10 @@ export function FollowUp({ m, sender, company, currency, onDecision }) {
       setErr("Confirm this bill's due date before planning the next step.");
       return;
     }
-    setBusy(true); setErr("");
+    // A recorded event can make the old chase unsafe before the new plan
+    // arrives. Keep it unavailable on failure until these same events retry.
+    setBusy(true); setErr(""); setDecision(null);
+    if (onPlanState) onPlanState("pending");
     const today = new Date();
     const iso = localIso;
     const due = new Date(today);
@@ -266,13 +269,15 @@ export function FollowUp({ m, sender, company, currency, onDecision }) {
         }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.detail || "The follow-up helper is unavailable right now.");
+      if (!res.ok || !Object.prototype.hasOwnProperty.call(KIND_PRESENT, json.kind)) throw new Error(json.detail || "The follow-up helper is unavailable right now.");
       setDecision(json);
       if (onDecision) onDecision(json);
+      if (onPlanState) onPlanState("ready");
     } catch (e2) {
       setErr(e2.message || "The follow-up helper is unavailable right now.");
+      if (onPlanState) onPlanState("error");
     } finally { setBusy(false); }
-  }, [m, sender, company, currency, onDecision]);
+  }, [m, sender, company, currency, onDecision, onPlanState]);
 
   const nextEventId = useRef(1);
   // The day a reply was actually received, editable: pasting a reply today
@@ -364,7 +369,9 @@ export function FollowUp({ m, sender, company, currency, onDecision }) {
           </button>
         </div>
       ) : null}
+      {busy ? <p className="hint" role="status">Checking the next step. The previous message is hidden.</p> : null}
       {err ? <div className="error" role="alert">{err}</div> : null}
+      {err && events.length && !busy ? <button type="button" className="btn ghost sm" onClick={() => decide(events)}>Retry next step</button> : null}
       {decision && present ? (
         <div className={"fu-decision"}>
           <span className={"tier " + present.cls}>{present.label}{decision.tier && decision.kind === "draft" ? ": " + decision.tier : ""}</span>
@@ -486,6 +493,8 @@ export function MessageCard({ m, currency, sender, company }) {
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState("whatsapp");
   const [fuDecision, setFuDecision] = useState(null);
+  const [planState, setPlanState] = useState("ready");
+  const planUnavailable = planState !== "ready";
   // The card shows the CURRENT plan's draft: after a new decision with a
   // message, that message (and its tier) replaces the original analysis one.
   const dm = fuDecision && fuDecision.message && (fuDecision.kind === "draft" || fuDecision.kind === "hold") ? fuDecision.message : null;
@@ -499,7 +508,7 @@ export function MessageCard({ m, currency, sender, company }) {
   // separators or extra recipients is dropped instead of interpolated.
   const safeEmail = safeEmailAddress(m.to_email);
   const mailto = buildMailto({ ...m, subject: curSubject, email: curEmail });
-  const badge = blocked ? KIND_PRESENT[fuDecision.kind] : null;
+  const badge = planUnavailable ? { cls: "t-warn", label: planState === "pending" ? "Checking next step" : "Next step unavailable" } : blocked ? KIND_PRESENT[fuDecision.kind] : null;
   return (
     <div className={"msg" + (open ? " open" : "")}>
       <button type="button" className="msg-head" onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -511,9 +520,12 @@ export function MessageCard({ m, currency, sender, company }) {
         </span>
         <span className="chev" aria-hidden="true">{open ? "−" : "+"}</span>
       </button>
-      {open ? (
+      {/* Keep this session's events and retry context when the card closes. */}
+      <div hidden={!open}>
         <div className="msg-body">
-          {blocked ? (
+          {planUnavailable ? (
+            <p className="hint">{planState === "pending" ? "Checking your latest update before showing a message." : "The latest update could not be checked. Retry the next step below; the previous message stays hidden."}</p>
+          ) : blocked ? (
             <p className="hint">No message to send while this one is {fuDecision.kind === "stop" ? "stopped" : fuDecision.kind === "pause" ? "paused" : fuDecision.kind === "none" ? "settled" : "waiting on your call"} - the plan below says why.</p>
           ) : (
             <>
@@ -532,9 +544,9 @@ export function MessageCard({ m, currency, sender, company }) {
               </div>
             </>
           )}
-          <FollowUp m={m} sender={sender} company={company} currency={currency} onDecision={setFuDecision} />
+          <FollowUp m={m} sender={sender} company={company} currency={currency} onDecision={setFuDecision} onPlanState={setPlanState} />
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }
