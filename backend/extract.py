@@ -79,6 +79,25 @@ _PARTY_BOUNDARY = re.compile(
     r"^\s*(?:ship(?:ping)?\s*to|ship\s*-|seller|from\b|bill\s*to|billed\s*to|"
     r"sold\s*to|buyer|customer)", re.I)
 
+# A name is not an address/contact zone: words such as Total, Price, Bank
+# and Payment can be part of a legal name. Stop name recovery on header
+# syntax or explicit party/payment directions, not those words alone.
+# Leading party labels remain ambiguous without punctuation: fail unknown
+# rather than adopting a shipping/seller party and its contacts. This also
+# omits real names beginning with a party word, such as From You Flowers.
+_NAME_BOUNDARY = re.compile(
+    r"^(?:ship(?:ping)?[ \t]*to|seller|from|bill(?:ed)?[ \t]*to|sold[ \t]*to|buyer|customer)\b|"
+    r"^ship[ \t]*-|"
+    r"^(?:remit(?:tance)?|pay|payment)[ \t]+to\b|"
+    r"^(?:please[ \t]+|kindly[ \t]+)?remit\b|"
+    r"^(?:for[ \t]+(?:any[ \t]+)?)?quer(?:y|ies)\b|"
+    r"^(?:please[ \t]+)?contact[ \t]+us\b|"
+    r"^(?:terms[ \t]+and[ \t]+conditions|invoice[ \t]+(?:no\.?|number|date)|thank[ \t]+you[ \t]+for)\b|"
+    r"^(?:bank|a/c|account|ifsc|swift|upi|remittance)[ \t]*[:\-]|"
+    r"^(?:total|grand[ \t]+total|amount|price|quantity|description|rate|item|due|tax|gst|terms|invoice|note)"
+    r"(?:[ \t]*[:\-]|[ \t]+(?:rs\.?|inr|[₹$€£])?[ \t]*\d|[ \t]*$)", re.I)
+
+
 def _plausible_phone(raw: str) -> bool:
     """A labeled number still has to BE a phone: 10-digit mobile (optionally
     with a +91/91/0 prefix) or an 11-digit 0-prefixed landline. Bank account
@@ -242,19 +261,20 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
 
     m_billto = RE_BILLTO.search(text)
     if m_billto:
-        m = m_billto
-        cand = _clean_name(m.group(1))
-        if not cand or _JUNK_LINE.match(cand) or _MONEY_IN_NAME.search(cand):
-            cand = ""
-            after = text[m.end():].splitlines()
-            for line in after[:4]:
-                c = _clean_name(line)
-                if c and not _JUNK_LINE.match(c) and not _MONEY_IN_NAME.search(c):
-                    cand = c
-                    break
-        if cand:
+        # A label can be empty or followed by a contact instead of a name.
+        # Name recovery must not cross another party or a payment/header
+        # block, but words within a legal name are not header syntax.
+        raw_candidates = [m_billto.group(1)] + text[m_billto.end():].splitlines()[:4]
+        for raw in raw_candidates:
+            if _NAME_BOUNDARY.match(raw.strip()):
+                break
+            cand = _clean_name(raw)
+            if (not cand or _JUNK_LINE.match(cand) or _MONEY_IN_NAME.search(cand)
+                    or _PHONE_LABEL.match(cand) or _EMAIL_LABEL.match(cand)):
+                continue
             out["customer"] = cand
             hits += 1
+            break
     # No bill-to label: customer stays empty. The header line is usually the
     # seller, not the debtor, and a wrong debtor is worse than a blank one:
     # the review step requires the user to type who owes them.
@@ -267,7 +287,7 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
     # two-column gutter narrower than the wide-gap cut can glue the seller's
     # column onto a debtor address line, so mid-line labels stay blank rather
     # than risk chasing the seller, a bank, or a warehouse.
-    contact_zone = _debtor_contact_zone(text, m_billto) if m_billto else ""
+    contact_zone = _debtor_contact_zone(text, m_billto) if m_billto and out["customer"] else ""
     for line in contact_zone.splitlines():
         stripped = line.lstrip()
         if _PHONE_LABEL.match(stripped):

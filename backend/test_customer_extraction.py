@@ -101,3 +101,90 @@ def test_billing_label_own_line_is_supported(label):
     row = extract.parse_invoice_text(label + "\nAcme Traders\nEmail: ap@acme.test")
     assert row["customer"] == "Acme Traders", row
     assert row["email"] == "ap@acme.test", row
+
+
+@pytest.mark.parametrize("tail", [
+    "Bill To:\nTotal: Rs 45000\nShip To: Warehouse Nine\nPhone: +91 99887 66554",
+    "Bill To:\nEmail: sales@seller.test\nRemit To: Seller Corp\nPhone: +91 98110 12345",
+    "Bill To:\nEmail: sales@seller.test\nShip To: Warehouse Nine\nPhone: +91 99887 66554",
+    "Bill To: Phone: +91 98110 12345\nBank: HDFC\nSeller Corp",
+    "Bill To: Total: Rs 45000\nSeller Corp",
+    "Bill To:\nEmail: sales@seller.test\nPlease remit payment to Seller Corp",
+    "Bill To:\nEmail: sales@seller.test",
+    "Bill To: Phone: +91 98110 12345",
+    "Bill To: Call +91 98110 12345",
+    "Bill To: Contact: sales@seller.test",
+    "Bill To: E-mail: sales@seller.test",
+])
+def test_missing_billing_name_never_crosses_party_or_payment_boundary(tail):
+    row = extract.parse_invoice_text("Invoice No: INV-99\nTotal: Rs 45000\n" + tail)
+    assert row["customer"] == "", row
+    assert row["email"] == "", row
+    assert row["phone"] == "", row
+
+
+def test_name_fallback_before_boundary_still_works():
+    row = extract.parse_invoice_text(
+        "Bill To: Email: ap@acme.test\nAcme Traders\nPhone: +91 99887 66554\n"
+        "Ship To: Warehouse Nine\nEmail: dock@warehouse.test")
+    assert row["customer"] == "Acme Traders", row
+    assert row["email"] == "ap@acme.test", row
+    assert row["phone"] == "+91 99887 66554", row
+
+
+@pytest.mark.parametrize("name", [
+    "Total Home Developers", "Total Environment", "Totalline Fabrics",
+    "Price Waterhouse Coopers", "Acme Payment Services", "Acme Bank Services",
+    "Account Services Limited", "Quantity Fabrics", "Description Studios",
+    "Rate Solutions", "Item Works", "Due North Limited", "Tax Advisors",
+    "GST Solutions", "Terms Consulting", "Invoice Systems", "Thank You Foods",
+    "Note Studios", "Declaration Works", "Signature Textiles", "Authorized Services",
+])
+@pytest.mark.parametrize("separator", [" ", "\n"])
+def test_billing_names_are_not_header_keywords(name, separator):
+    row = extract.parse_invoice_text(
+        "Bill To:" + separator + name + "\nEmail: ap@debtor.test")
+    assert row["customer"] == name, row
+    assert row["email"] == "ap@debtor.test", row
+
+
+@pytest.mark.parametrize("party", ["Remit To: Seller Corp", "Ship To: Warehouse Nine", "Seller: Other Corp"])
+def test_glued_party_header_is_not_billing_name(party):
+    row = extract.parse_invoice_text("Bill To: " + party + "\nEmail: wrong@other.test")
+    assert row["customer"] == "", row
+    assert row["email"] == "", row
+
+
+@pytest.mark.parametrize("party", [
+    "Ship To Warehouse Nine", "Shipping To Warehouse Nine", "Ship-Warehouse Nine",
+    "Sold To Other Corp", "Buyer Other Corp", "Seller Bluepeak Logistics",
+    "From Bluepeak Logistics", "Customer Other Corp", "Bill To Other Corp",
+    "Billed To Other Corp", "ShipTo Warehouse Nine",
+])
+@pytest.mark.parametrize("prefix", ["Bill To: ", "Bill To:\n", "Bill To:\nEmail: unknown@other.test\n"])
+def test_undelimited_party_never_establishes_debtor(party, prefix):
+    row = extract.parse_invoice_text(
+        prefix + party + "\nEmail: ops@other.test\nPhone: +91 99887 66554")
+    assert row["customer"] == "", row
+    assert row["email"] == "", row
+    assert row["phone"] == "", row
+
+
+@pytest.mark.parametrize("name", [
+    "Acme Seller Services", "Acme Customer Solutions", "Buyerly Textiles",
+    "Sellerly Logistics", "Fromage Foods", "Bank of America Corp",
+    "Discount Industries", "Balance Foods", "Paid Solutions", "Change Works",
+])
+@pytest.mark.parametrize("separator", [" ", "\n"])
+def test_party_substrings_and_internal_words_remain_legal_names(name, separator):
+    row = extract.parse_invoice_text("Bill To:" + separator + name + "\nEmail: ap@debtor.test")
+    assert row["customer"] == name, row
+    assert row["email"] == "ap@debtor.test", row
+
+
+@pytest.mark.parametrize("name", ["From You Flowers", "Customer First Bank", "Seller Services Ltd"])
+@pytest.mark.parametrize("separator", [" ", "\n"])
+def test_ambiguous_leading_party_names_are_conservatively_unknown(name, separator):
+    row = extract.parse_invoice_text("Bill To:" + separator + name + "\nEmail: ap@debtor.test")
+    assert row["customer"] == "", row
+    assert row["email"] == "", row
