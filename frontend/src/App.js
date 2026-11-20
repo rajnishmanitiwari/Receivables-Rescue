@@ -545,7 +545,7 @@ export default function App() {
   const [reading, setReading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState(null);
+  const [resultSnapshot, setResult] = useState(null);
   const [showPaste, setShowPaste] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [showAssume, setShowAssume] = useState(false);
@@ -555,6 +555,18 @@ export default function App() {
   const [currency, setCurrency] = useState("INR");
   const [sender, setSender] = useState("");
   const [company, setCompany] = useState("");
+
+  // A chase belongs to the exact inputs used to generate it. Hide it in
+  // the same render as any edit, before an effect or an old response runs.
+  const analysisKey = JSON.stringify([rows, currency, sender, company]);
+  const result = resultSnapshot && resultSnapshot.key === analysisKey ? resultSnapshot.value : null;
+  const analysisRequest = useRef(0);
+  useEffect(() => {
+    // Edits cancel ownership of pending responses, not just visible output.
+    analysisRequest.current += 1;
+    setResult(null);
+    setBusy(false);
+  }, [analysisKey]);
 
   const resultRef = useRef(null);
   const reviewRef = useRef(null);
@@ -575,6 +587,8 @@ export default function App() {
 
   const addFiles = useCallback(async (files) => {
     if (!files.length) return;
+    analysisRequest.current += 1;
+    setBusy(false);
     setReading(true); setError(""); setResult(null);
     const fd = new FormData();
     files.slice(0, 12).forEach((f) => fd.append("files", f));
@@ -622,6 +636,7 @@ export default function App() {
       setError("Check and confirm the name and contacts on each PDF or photo bill before generating a chase.");
       return;
     }
+    const request = ++analysisRequest.current;
     setBusy(true); setError(""); setResult(null);
     try {
       const unconfirmed = clean.filter((r) => r.date_assumed).length;
@@ -637,11 +652,11 @@ export default function App() {
       if (!res.ok) throw new Error(json.detail || "Something went wrong reading those rows.");
       if (unconfirmed) json.warnings = [...(json.warnings || []),
         unconfirmed + " assumed due date(s) were not confirmed, so those bills stay unscheduled. Confirm or enter their dates to chase them."];
-      setResult(json);
+      if (request === analysisRequest.current) setResult({ key: analysisKey, value: json });
     } catch (err) {
-      setError(err.message || "Something went wrong. Try again.");
-    } finally { setBusy(false); }
-  }, [rows, currency, sender, company]);
+      if (request === analysisRequest.current) setError(err.message || "Something went wrong. Try again.");
+    } finally { if (request === analysisRequest.current) setBusy(false); }
+  }, [rows, currency, sender, company, analysisKey]);
 
   const rep = result && result.report;
   const overdueRows = rep ? rep.priority.filter((p) => p.days_overdue > 0) : [];
@@ -682,7 +697,7 @@ export default function App() {
     if (error && error.startsWith("Check and confirm the name and contacts") && !rows.some((r) => Number(r.amount) > 0 && r.recipient_unconfirmed)) setError("");
     if (rows.some((r) => r.recipient_unconfirmed)) setResult(null);
   }, [rows]);  // eslint-disable-line react-hooks/exhaustive-deps
-  const reset = () => { setRows([]); setResult(null); setNotes([]); setError(""); };
+  const reset = () => { analysisRequest.current += 1; setBusy(false); setRows([]); setResult(null); setNotes([]); setError(""); };
 
   return (
     <div className="page">
@@ -720,7 +735,7 @@ export default function App() {
             {rows.length ? null : (
               <>
                 <span className="sep" aria-hidden="true">&middot;</span>
-                <button type="button" className="btn link" onClick={() => { setRows(SAMPLE_ROWS.map((r) => ({ ...BLANK, ...r }))); setNotes([]); setResult(null); }}>
+                <button type="button" className="btn link" onClick={() => { analysisRequest.current += 1; setBusy(false); setRows(SAMPLE_ROWS.map((r) => ({ ...BLANK, ...r }))); setNotes([]); setResult(null); }}>
                   Try it with example bills
                 </button>
               </>
