@@ -141,7 +141,12 @@ function Drop({ onFiles, busy }) {
 }
 
 export function ReviewTable({ rows, setRows, currency }) {
-  const update = (i, key, val) => setRows(rows.map((r, n) => (n === i ? { ...r, [key]: val, ...(key === "due_date" ? { date_assumed: false } : {}) } : r)));
+  const update = (i, key, val) => setRows(rows.map((r, n) => (n === i ? {
+    ...r, [key]: val, ...(key === "due_date" ? { date_assumed: false } : {}),
+    // Correcting a provisional name must not silently reuse the old party's contacts.
+    ...(r.recipient_review_required && ["customer", "email", "phone"].includes(key) ? { recipient_unconfirmed: true } : {}),
+    ...(key === "customer" && r.recipient_review_required ? { email: "", phone: "" } : {}),
+  } : r)));
   const remove = (i) => setRows(rows.filter((_, n) => n !== i));
   const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   return (
@@ -157,7 +162,13 @@ export function ReviewTable({ rows, setRows, currency }) {
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className={r.confidence === "low" ? "shaky" : ""}>
-                <td><input className={String(r.customer || "").trim() ? undefined : "need"} value={r.customer} onChange={(e) => update(i, "customer", e.target.value)} placeholder="Customer name" /></td>
+                <td><input className={String(r.customer || "").trim() ? undefined : "need"} value={r.customer} onChange={(e) => update(i, "customer", e.target.value)} placeholder="Customer name" />
+                  {r.recipient_unconfirmed ? <div className="recipient-check">
+                    <p>Check this is who owes you, not the seller or shipping party. PDF layout can mix them up.</p>
+                    <p><strong>{r.customer || "No name"}</strong><br />Email: {r.email || "None"}<br />Phone: {r.phone || "None"}</p>
+                    <button type="button" className="btn ghost sm" disabled={!String(r.customer || "").trim()} onClick={() => update(i, "recipient_unconfirmed", false)}>Confirm name and contacts</button>
+                  </div> : null}
+                </td>
                 <td><input className="w-sm" value={r.invoice_no} onChange={(e) => update(i, "invoice_no", e.target.value)} placeholder="-" /></td>
                 <td><input className="w-sm num" inputMode="decimal" value={r.amount} onChange={(e) => update(i, "amount", e.target.value)} placeholder="0" /></td>
                 <td>
@@ -571,7 +582,12 @@ export default function App() {
       const res = await fetch(API + "/api/extract", { method: "POST", body: fd });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.detail || "Those files could not be read.");
-      const got = (json.rows || []).map((r) => ({ ...BLANK, ...r, amount: r.amount == null ? "" : r.amount, due_date: r.due_date || "" }));
+      const got = (json.rows || []).map((r) => {
+        // Source fallback also gates document rows during a rolling API update.
+        const documentRecipient = r.recipient_review_required || /\.(pdf|png|jpe?g|webp|heic)$/i.test(r.source || "");
+        return { ...BLANK, ...r, amount: r.amount == null ? "" : r.amount, due_date: r.due_date || "",
+          ...(documentRecipient ? { recipient_review_required: true, recipient_unconfirmed: true } : {}) };
+      });
       setRows((prev) => [...prev, ...got]);
       // Guessed-date notes are derived from the live rows (see guessNotes);
       // keeping the static strings would leave a stale "not scheduled"
@@ -600,6 +616,10 @@ export default function App() {
     const missingCustomer = clean.filter((r) => !String(r.customer || "").trim()).length;
     if (missingCustomer) {
       setError(missingCustomer + " bill(s) have no customer name. Type who owes you in the review table; we never guess it.");
+      return;
+    }
+    if (clean.some((r) => r.recipient_unconfirmed)) {
+      setError("Check and confirm the name and contacts on each PDF or photo bill before generating a chase.");
       return;
     }
     setBusy(true); setError(""); setResult(null);
@@ -659,6 +679,8 @@ export default function App() {
   // The missing-customer gate error retires as soon as every row has a name.
   useEffect(() => {
     if (error && error.includes("no customer name") && !customerNotes(rows).length) setError("");
+    if (error && error.startsWith("Check and confirm the name and contacts") && !rows.some((r) => Number(r.amount) > 0 && r.recipient_unconfirmed)) setError("");
+    if (rows.some((r) => r.recipient_unconfirmed)) setResult(null);
   }, [rows]);  // eslint-disable-line react-hooks/exhaustive-deps
   const reset = () => { setRows([]); setResult(null); setNotes([]); setError(""); };
 

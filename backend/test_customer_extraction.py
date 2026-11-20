@@ -188,3 +188,60 @@ def test_ambiguous_leading_party_names_are_conservatively_unknown(name, separato
     row = extract.parse_invoice_text("Bill To:" + separator + name + "\nEmail: ap@debtor.test")
     assert row["customer"] == "", row
     assert row["email"] == "", row
+
+
+@pytest.mark.parametrize("text", [
+    "Bill To: Acme Traders\nTotal: Rs 5000",
+    "Bill To:\n              Bluepeak Logistics\nEmail: sales@seller.test\nTotal: Rs 5000",
+    "Bill To:\nShip To Warehouse Nine\nTotal: Rs 5000",
+])
+def test_document_recipient_remains_provisional_even_when_name_missing(text):
+    row = extract.parse_invoice_text(text)
+    assert row["recipient_review_required"] is True
+    assert row["recipient_unconfirmed"] is True
+
+
+def test_csv_recipient_does_not_gain_document_confirmation_gate():
+    import asyncio
+    result = asyncio.run(extract.extract_file("bills.csv", b"customer,bill_no,amount,due_date\nAcme,INV-1,5000,2026-10-15"))
+    assert result["rows"]
+    assert not result["rows"][0].get("recipient_unconfirmed")
+
+
+
+def test_pdf_upload_flags_recipient_for_review():
+    import asyncio
+    import pymupdf
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Synthetic invoice\nInvoice No: INV-C30\nInvoice Date: 2026-10-01\nDue Date: 2026-10-15\nTotal: Rs 45000\nBill To:\n              Bluepeak Logistics\nEmail: sales@seller.test")
+    result = asyncio.run(extract.extract_file("bill.pdf", doc.tobytes()))
+    row = result["rows"][0]
+    assert row["customer"] == "Bluepeak Logistics"
+    assert row["source"] == "bill.pdf"
+    assert row["recipient_unconfirmed"] is True
+    assert row["recipient_review_required"] is True
+    assert row["amount"] == 45000
+
+
+def test_vision_recipient_is_also_provisional(monkeypatch):
+    import asyncio
+    class Response:
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"choices": [{"message": {"content": '{"invoices":[{"customer":"Acme","amount":5000}]}'}}]}
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def post(self, *args, **kwargs):
+            return Response()
+    monkeypatch.setenv("LLM_API_KEY", "synthetic-test-only")
+    monkeypatch.setattr(extract.httpx, "AsyncClient", Client)
+    rows = asyncio.run(extract.extract_via_vision([b"synthetic-not-an-image"]))
+    assert rows[0]["recipient_unconfirmed"] is True
+    assert rows[0]["recipient_review_required"] is True

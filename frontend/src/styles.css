@@ -314,3 +314,8 @@ table.data tbody tr:hover{background:var(--wash)}
 .fu-check input{width:16px;height:16px}
 
 .review-table input.need { border-color: #b3261e; background: #fdf1ef; }
+
+/* Provisional document recipients need readable identity, not clipped inputs. */
+.recipient-check { min-width: 180px; max-width: 260px; white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; padding: 8px 0; }
+.recipient-check p { margin: 0 0 8px; }
+.recipient-check .btn { white-space: normal; text-align: left; }

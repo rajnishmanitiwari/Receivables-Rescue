@@ -299,6 +299,10 @@ def parse_invoice_text(text: str) -> dict[str, Any]:
             if m:
                 out["email"] = m.group(0)[:120]
 
+    # A text label does not prove which PDF column owns a name/contact.
+    # Keep extracted recipients provisional until the review UI affirms them.
+    out["recipient_review_required"] = True
+    out["recipient_unconfirmed"] = True
     out["confidence"] = "high" if hits >= 3 else "medium" if hits == 2 else "low"
     return out
 
@@ -361,6 +365,8 @@ async def extract_via_vision(images: list[bytes]) -> list[dict[str, Any]]:
             "email": str(item.get("email") or "")[:120],
             "phone": str(item.get("phone") or "")[:40],
             "confidence": "medium",
+            "recipient_review_required": True,
+            "recipient_unconfirmed": True,
         })
     return [r for r in rows if r["amount"]]
 
