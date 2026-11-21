@@ -1,0 +1,5 @@
+import {csvText,chaseCsv} from './chaseCsv';
+test.each(['=1+1','+42','-42','@SUM(1)','  =1','\t=1','\rtext','\ntext','\u0000text','＝1','＋1','－1','＠SUM(1)'])('formula-like or leading control text %p gets a visible literal marker',s=>{expect(csvText(s)).toBe('"[text] '+s+'"');});
+test.each(['Acme "North", Ltd','two\nlines','O\'Neil; East','नमस्ते','INV-38','2026-11-22'])('normal text %p survives CSV quoting unchanged',s=>expect(csvText(s)).toBe('"'+s.replace(/"/g,'""')+'"'));
+test('null is blank, numbers are finite numeric only, and every text column uses the guard',()=>{const s=chaseCsv([{rank:1,customer:'=1',invoice_no:'+2',amount:100,due_date:'@3',days_overdue:0,bucket:'-4',tier:'＝5'},{rank:'=6',amount:Infinity,days_overdue:null}]);expect(s.split('\n')[1]).toBe('1,"[text] =1","[text] +2",100,"[text] @3",0,"[text] -4","[text] ＝5"');expect(s.split('\n')[2]).toBe(',"","",,"",,"",""');});
+test('delimiters and quotes cannot create an unquoted new cell',()=>{expect(csvText('Acme",=1+1,"X')).toBe('"Acme"",=1+1,""X"');});

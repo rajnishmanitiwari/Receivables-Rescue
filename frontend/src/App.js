@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { applyPromiseDateToEvents, clearPromiseDateFromEvents, buildNextActionEvents, localIso, isOutlierDate, confirmedDueDate } from "./promiseDate";
 import { safeEmailAddress, buildMailto } from "./mailto";
 import SAMPLE_ROWS from "./sample";
+import { chaseCsv } from "./chaseCsv";
 
 const API = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
 const SYMBOLS = { INR: "₹", USD: "$", EUR: "€", GBP: "£", AED: "AED " };
@@ -719,14 +720,7 @@ export default function App() {
   const unknownDates = rep ? rep.priority.filter((p) => p.days_overdue == null).length : 0;
   const oldestDays = rep ? Math.max(0, ...rep.priority.map((p) => p.days_overdue)) : 0;
 
-  const csvOut = useMemo(() => {
-    if (!rep) return "";
-    const head = "Heuristic rank,Customer,Invoice,Amount,Due date,Days late,Bucket,Draft tier\n";
-    return head + rep.priority.map((p) => [
-      p.rank, '"' + String(p.customer).replace(/"/g, "'") + '"', '"' + String(p.invoice_no || "").replace(/"/g, "'") + '"',
-      p.amount, p.due_date || "", p.days_overdue ?? "", '"' + p.bucket + '"', p.tier,
-    ].join(",")).join("\n");
-  }, [rep]);
+  const csvOut = useMemo(() => rep ? chaseCsv(rep.priority) : "", [rep]);
 
   const download = () => {
     const blob = new Blob([csvOut], { type: "text/csv;charset=utf-8" });
@@ -944,7 +938,7 @@ export default function App() {
                   <Copy text={shareText} label="Copy share text" />
                 </div> : null}
               </div>
-              {!hasPayments ? <p className="hint">Downloads and share text summarise the bills you entered, not collection forecasts or legal amounts. List order uses aging assumptions.</p> : null}
+              {!hasPayments ? <p className="hint">Downloads and share text summarise the bills you entered, not collection forecasts or legal amounts. List order uses aging assumptions. Downloads mark formula-like text with [text]; that marker is part of the exported value.</p> : null}
               <div className="msgs">
                 {result.messages.map((m, i) => <MessageCard key={i} m={m} currency={currency} sender={sender} company={company} onPaymentRecorded={recordPayment} />)}
               </div>
