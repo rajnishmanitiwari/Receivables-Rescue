@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { applyPromiseDateToEvents, clearPromiseDateFromEvents, buildNextActionEvents, localIso, isOutlierDate } from "./promiseDate";
+import { applyPromiseDateToEvents, clearPromiseDateFromEvents, buildNextActionEvents, localIso, isOutlierDate, confirmedDueDate } from "./promiseDate";
 import { safeEmailAddress, buildMailto } from "./mailto";
 import SAMPLE_ROWS from "./sample";
 
@@ -244,12 +244,15 @@ export function FollowUp({ m, sender, company, currency, onDecision, onPlanState
     }
     // A recorded event can make the old chase unsafe before the new plan
     // arrives. Keep it unavailable on failure until these same events retry.
+    const due = confirmedDueDate(m.due_date);
+    if (!due) {
+      setErr("Generate a fresh chase with a confirmed due date before planning the next step.");
+      return;
+    }
     setBusy(true); setErr(""); setDecision(null);
     if (onPlanState) onPlanState("pending");
     const today = new Date();
     const iso = localIso;
-    const due = new Date(today);
-    due.setDate(due.getDate() - (Number(m.days_overdue) || 0));  // calendar days: DST-safe
     try {
       const res = await fetch(API + "/api/next-action", {
         method: "POST",
@@ -257,7 +260,7 @@ export function FollowUp({ m, sender, company, currency, onDecision, onPlanState
         body: JSON.stringify({
           number: (m.invoice_no || m.customer || "invoice").slice(0, 60),
           amount: Number(m.amount) || 1,
-          due: iso(due),
+          due,
           today: iso(today),
           customer: (m.customer || "").slice(0, 120),
           email: (m.to_email || "").slice(0, 200),
@@ -688,7 +691,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           data: rowsToCsv(stripUnconfirmedDates(clean)), currency, sender_name: sender, company_name: company,
-          bank_rate: null,
+          bank_rate: null, today: localIso(new Date()),
         }),
       });
       const json = await res.json().catch(() => ({}));

@@ -20,7 +20,7 @@ function setup(decision) {
   const el = document.createElement("div");
   document.body.appendChild(el);
   const root = createRoot(el);
-  act(() => { root.render(<FollowUp m={{ invoice_no: "INV-1", customer: "Acme", amount: 100, days_overdue: 25, tier: "firm" }} />); });
+  act(() => { root.render(<FollowUp m={{ invoice_no: "INV-1", customer: "Acme", amount: 100, days_overdue: 25, due_date: "2026-10-15", tier: "firm" }} />); });
   return { calls, el, root };
 }
 

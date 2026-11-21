@@ -10,7 +10,7 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 
 const M = {
   tier: "firm", tier_label: "Firm follow-up", customer: "Acme Traders",
-  invoice_no: "INV-1", amount: 1000, days_overdue: 38, why: "original why",
+  invoice_no: "INV-1", amount: 1000, days_overdue: 38, due_date: "2026-10-15", why: "original why",
   subject: "Overdue: INV-1", email: "ORIGINAL EMAIL", whatsapp: "ORIGINAL WHATSAPP",
   to_email: "ap@acme.example", to_phone: "+919999999999",
 };

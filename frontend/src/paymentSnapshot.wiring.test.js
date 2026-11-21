@@ -4,7 +4,7 @@ import {act} from 'react-dom/test-utils';
 import App from './App';
 global.IS_REACT_ACT_ENVIRONMENT=true;
 HTMLElement.prototype.scrollIntoView=jest.fn();
-const M={customer:'Acme',invoice_no:'INV-34',amount:5000,days_overdue:36,tier:'firm',tier_label:'Firm follow-up',whatsapp:'PAY 5000',email:'PAY 5000',subject:'Bill',to_phone:'+919999999999'};
+const M={customer:'Acme',invoice_no:'INV-34',amount:5000,days_overdue:36, due_date: "2026-10-15",tier:'firm',tier_label:'Firm follow-up',whatsapp:'PAY 5000',email:'PAY 5000',subject:'Bill',to_phone:'+919999999999'};
 const report={total_outstanding:5000,invoice_count:1,customer_count:1,priority:[{...M,due_date:'2026-10-15',bucket:'31-60',probability:70}],buckets:[{bucket:'31-60',amount:5000,probability:70}],customers:[{customer:'Acme',amount:5000,count:1,oldest_days:36,share:100}],risks:[]};
 const ok=value=>({ok:true,json:async()=>value});
 const button=(el,text)=>[...el.querySelectorAll('button')].find(x=>x.textContent.trim()===text);

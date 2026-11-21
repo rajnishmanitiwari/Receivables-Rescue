@@ -45,3 +45,11 @@ export function isOutlierDate(dstr, todayIso, windowDays = OUTLIER_WINDOW_DAYS) 
   const days = Math.round((new Date(dstr + "T00:00:00") - new Date(todayIso + "T00:00:00")) / 86400000);
   return days > windowDays ? days : 0;
 }
+
+// Only an exact calendar date supplied with the reviewed bill can anchor a
+// follow-up. Never infer it from days late, which ages and crosses timezones.
+export function confirmedDueDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(value + "T00:00:00Z");
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : null;
+}

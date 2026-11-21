@@ -18,7 +18,7 @@ function setup() {
   const el = document.createElement("div");
   document.body.appendChild(el);
   const root = createRoot(el);
-  act(() => { root.render(<FollowUp m={{ invoice_no: "INV-1", customer: "Acme", amount: 100, days_overdue: 25, tier: "firm" }} />); });
+  act(() => { root.render(<FollowUp m={{ invoice_no: "INV-1", customer: "Acme", amount: 100, days_overdue: 25, due_date: "2026-10-15", tier: "firm" }} />); });
   return { calls, el, root };
 }
 
@@ -90,7 +90,7 @@ test("suggestion confirm lands on the server-echoed reply_index, not list-last",
   const el = document.createElement("div");
   document.body.appendChild(el);
   const root = createRoot(el);
-  act(() => { root.render(<FollowUp m={{ invoice_no: "INV-2", customer: "Acme", amount: 100, days_overdue: 25, tier: "firm" }} />); });
+  act(() => { root.render(<FollowUp m={{ invoice_no: "INV-2", customer: "Acme", amount: 100, days_overdue: 25, due_date: "2026-10-15", tier: "firm" }} />); });
   const setTA = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
   const logReply = async (text) => {
     const replied = Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "They replied");
@@ -131,7 +131,7 @@ test("a suggestion whose echo does not match the event gets no confirm path", as
   const el = document.createElement("div");
   document.body.appendChild(el);
   const root = createRoot(el);
-  act(() => { root.render(<FollowUp m={{ invoice_no: "INV-3", customer: "Acme", amount: 100, days_overdue: 25, tier: "firm" }} />); });
+  act(() => { root.render(<FollowUp m={{ invoice_no: "INV-3", customer: "Acme", amount: 100, days_overdue: 25, due_date: "2026-10-15", tier: "firm" }} />); });
   const replied = Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "They replied");
   await act(async () => { replied.click(); });
   const ta = el.querySelector("textarea");

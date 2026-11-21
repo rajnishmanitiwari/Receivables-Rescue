@@ -3,7 +3,7 @@ import {createRoot} from "react-dom/client";
 import {act} from "react-dom/test-utils";
 import {MessageCard} from "./App";
 global.IS_REACT_ACT_ENVIRONMENT=true;
-const M={tier:"firm",tier_label:"Firm follow-up",customer:"Acme",invoice_no:"INV-33",amount:1000,days_overdue:38,subject:"Original subject",email:"OLD EMAIL",whatsapp:"OLD CHASE",to_email:"ap@acme.test",to_phone:"+919999999999"};
+const M={tier:"firm",tier_label:"Firm follow-up",customer:"Acme",invoice_no:"INV-33",amount:1000,days_overdue:38, due_date: "2026-10-15",subject:"Original subject",email:"OLD EMAIL",whatsapp:"OLD CHASE",to_email:"ap@acme.test",to_phone:"+919999999999"};
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject};};
 const ok=value=>({ok:true,json:async()=>value});
 const btn=(el,text)=>[...el.querySelectorAll('button')].find(x=>x.textContent.trim()===text);

@@ -174,6 +174,9 @@ class AnalyseRequest(BaseModel):
     language: str = Field("English", max_length=40)
     # None switches the MSMED statutory-interest calculation off (non-India users).
     bank_rate: float | None = Field(None, ge=0, le=25)
+    # Browser callers provide their local calendar day. Legacy clients retain
+    # the server-day default, captured once for both parsing and analysis.
+    today: date | None = None
 
 
 @api.get("/health")
@@ -214,15 +217,16 @@ async def stats():
 
 @api.post("/analyse")
 async def analyse(req: AnalyseRequest):
+    today = req.today or date.today()
     try:
-        invoices, warnings = engine.parse_invoices(req.data, today=date.today())
+        invoices, warnings = engine.parse_invoices(req.data, today=today)
     except engine.ParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("parse failure")
         raise HTTPException(status_code=422, detail="Could not read that file. Check the format and try again.") from exc
 
-    report = engine.analyse(invoices, today=date.today(), bank_rate=req.bank_rate if INTEREST_ENABLED else None)
+    report = engine.analyse(invoices, today=today, bank_rate=req.bank_rate if INTEREST_ENABLED else None)
     followups = msg.build_messages(
         report["priority"],
         sender=req.sender_name,

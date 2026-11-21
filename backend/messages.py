@@ -147,6 +147,7 @@ def build_messages(
             "customer": inv["customer"],
             "amount": inv["amount"],
             "days_overdue": inv["days_overdue"],
+            "due_date": inv["due_date"],
             "tier": tier,
             "tier_label": TIER_LABELS[tier],
             "why": TIER_GUIDANCE[tier],
