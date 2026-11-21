@@ -366,6 +366,12 @@ async def next_action(req: PlanRequest):
         evs.append(fp.Event(e.day, e.type, label, e.promise_date, e.amount, e.tier, flags))
     inv = fp.Invoice(req.number, req.amount, req.due, req.status)
     a = fp.next_action(inv, evs, today)
+    # Recorded payments do not reconcile the invoice's original amount. Until
+    # that workflow exists, never draft/hold an original-amount chase for a
+    # partially paid bill, including direct API clients. Fully paid STOP and
+    # other restrictive decisions remain intact.
+    if any(e.type == "payment" and (e.amount or 0) > 0 and e.day <= today for e in evs) and a.kind in (fp.Kind.DRAFT, fp.Kind.HOLD):
+        a = fp.Action(fp.Kind.HUMAN, "recorded payments require balance review before another message")
     out = {"kind": a.kind.value, "reason": a.reason, "tier": a.tier,
            "until": a.until.isoformat() if a.until else None, "prototype": True}
     # The card's draft must match the current plan: when the plan is to send (now

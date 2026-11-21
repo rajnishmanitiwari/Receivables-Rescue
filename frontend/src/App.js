@@ -220,7 +220,7 @@ const KIND_PRESENT = {
   none:       { label: "Nothing to do",    cls: "t-ok" },
 };
 
-export function FollowUp({ m, sender, company, currency, onDecision, onPlanState }) {
+export function FollowUp({ m, sender, company, currency, onDecision, onPlanState, onPaymentRecorded }) {
   const [events, setEvents] = useState([]);
   const [decision, setDecision] = useState(null);
   const [replyOpen, setReplyOpen] = useState(false);
@@ -284,10 +284,12 @@ export function FollowUp({ m, sender, company, currency, onDecision, onPlanState
   // does not mean the customer wrote it today. Defaults to local today.
   const [replyDay, setReplyDay] = useState(() => localIso(new Date()));
   const log = (e) => {
+    if (e.type === "payment" && (!Number.isFinite(e.amount) || e.amount <= 0)) { setErr("Enter a valid payment amount greater than zero."); return; }
     const day = e.type === "reply" ? replyDay : localIso(new Date());
     if (day > localIso(new Date())) { setErr("The reply date cannot be in the future."); return; }
     const next = [...events, { ...e, id: nextEventId.current++, day }];
     setEvents(next);
+    if (e.type === "payment" && onPaymentRecorded) onPaymentRecorded(e.amount);
     decide(next);
   };
 
@@ -363,7 +365,7 @@ export function FollowUp({ m, sender, company, currency, onDecision, onPlanState
           <label htmlFor={"fu-pay-" + m.invoice_no}>Amount received</label>
           <input id={"fu-pay-" + m.invoice_no} inputMode="decimal" value={payAmount}
             onChange={(e) => setPayAmount(e.target.value)} />
-          <button type="button" className="btn primary sm" disabled={busy || !(Number(payAmount) > 0)}
+          <button type="button" className="btn primary sm" disabled={busy || !Number.isFinite(Number(payAmount)) || !(Number(payAmount) > 0)}
             onClick={() => { log({ type: "payment", amount: Number(payAmount) }); setPayOpen(false); }}>
             Record payment
           </button>
@@ -489,11 +491,16 @@ export function FollowUp({ m, sender, company, currency, onDecision, onPlanState
   );
 }
 
-export function MessageCard({ m, currency, sender, company }) {
+export function MessageCard({ m, currency, sender, company, onPaymentRecorded }) {
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState("whatsapp");
   const [fuDecision, setFuDecision] = useState(null);
   const [planState, setPlanState] = useState("ready");
+  const [hasPayment, setHasPayment] = useState(false);
+  const paymentRecorded = (amount) => {
+    setHasPayment(true);
+    if (onPaymentRecorded) onPaymentRecorded({ customer: m.customer, invoice_no: m.invoice_no, amount, currency });
+  };
   const planUnavailable = planState !== "ready";
   // The card shows the CURRENT plan's draft: after a new decision with a
   // message, that message (and its tier) replaces the original analysis one.
@@ -508,14 +515,14 @@ export function MessageCard({ m, currency, sender, company }) {
   // separators or extra recipients is dropped instead of interpolated.
   const safeEmail = safeEmailAddress(m.to_email);
   const mailto = buildMailto({ ...m, subject: curSubject, email: curEmail });
-  const badge = planUnavailable ? { cls: "t-warn", label: planState === "pending" ? "Checking next step" : "Next step unavailable" } : blocked ? KIND_PRESENT[fuDecision.kind] : null;
+  const badge = planUnavailable ? { cls: "t-warn", label: planState === "pending" ? "Checking next step" : "Next step unavailable" } : blocked ? KIND_PRESENT[fuDecision.kind] : hasPayment ? { cls: "t-warn", label: "Balance needs review" } : null;
   return (
     <div className={"msg" + (open ? " open" : "")}>
       <button type="button" className="msg-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className={"tier " + (badge ? badge.cls : TIER_CLASS[dm ? dm.tier : m.tier])}>{badge ? badge.label : (dm ? dm.tier_label : m.tier_label)}</span>
         <span className="msg-cust">{m.customer}</span>
         <span className="msg-meta">
-          {m.invoice_no ? m.invoice_no + " · " : ""}{money(m.amount, currency)}
+          {m.invoice_no ? m.invoice_no + " · " : ""}{hasPayment ? "Original bill: " : ""}{money(m.amount, currency)}
           {" · "}{m.days_overdue > 0 ? m.days_overdue + " days late" : "not late yet"}
         </span>
         <span className="chev" aria-hidden="true">{open ? "−" : "+"}</span>
@@ -527,6 +534,8 @@ export function MessageCard({ m, currency, sender, company }) {
             <p className="hint">{planState === "pending" ? "Checking your latest update before showing a message." : "The latest update could not be checked. Retry the next step below; the previous message stays hidden."}</p>
           ) : blocked ? (
             <p className="hint">No message to send while this one is {fuDecision.kind === "stop" ? "stopped" : fuDecision.kind === "pause" ? "paused" : fuDecision.kind === "none" ? "settled" : "waiting on your call"} - the plan below says why.</p>
+          ) : hasPayment ? (
+            <p className="hint">A payment is logged for this bill. Its remaining balance has not been reconciled, so no further message is available in this session.</p>
           ) : (
             <>
               <p className="msg-why">{dm ? dm.why : m.why}</p>
@@ -544,7 +553,7 @@ export function MessageCard({ m, currency, sender, company }) {
               </div>
             </>
           )}
-          <FollowUp m={m} sender={sender} company={company} currency={currency} onDecision={setFuDecision} onPlanState={setPlanState} />
+          <FollowUp m={m} sender={sender} company={company} currency={currency} onDecision={setFuDecision} onPlanState={setPlanState} onPaymentRecorded={paymentRecorded} />
         </div>
       </div>
     </div>
@@ -558,6 +567,11 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [resultSnapshot, setResult] = useState(null);
+  // Payment logs do not recalculate the original analysis. Retire its monetary
+  // snapshots and keep this session's payment record even if inputs are edited.
+  const [payments, setPayments] = useState([]);
+  const recordPayment = useCallback((payment) => setPayments((prev) => [...prev, payment]), []);
+  const hasPayments = payments.length > 0;
   const [showPaste, setShowPaste] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [showAssume, setShowAssume] = useState(false);
@@ -653,6 +667,7 @@ export default function App() {
   };
 
   const run = useCallback(async () => {
+    if (hasPayments) return;
     const clean = rows.filter((r) => Number(r.amount) > 0);
     if (!clean.length) { setError("Add at least one bill with an amount."); return; }
     const missingCustomer = clean.filter((r) => !String(r.customer || "").trim()).length;
@@ -684,7 +699,7 @@ export default function App() {
     } catch (err) {
       if (request === analysisRequest.current) setError(err.message || "Something went wrong. Try again.");
     } finally { if (request === analysisRequest.current) setBusy(false); }
-  }, [rows, currency, sender, company, analysisKey]);
+  }, [rows, currency, sender, company, analysisKey, hasPayments]);
 
   const rep = result && result.report;
   const overdueRows = rep ? rep.priority.filter((p) => p.days_overdue > 0) : [];
@@ -725,14 +740,16 @@ export default function App() {
     if (error && error.startsWith("Check and confirm the name and contacts") && !rows.some((r) => Number(r.amount) > 0 && r.recipient_unconfirmed)) setError("");
     if (rows.some((r) => r.recipient_unconfirmed)) setResult(null);
   }, [rows]);  // eslint-disable-line react-hooks/exhaustive-deps
-  const reset = () => { abandonImports(); analysisRequest.current += 1; setBusy(false); setRows([]); setResult(null); setNotes([]); setError(""); };
+  const reset = () => {
+    if (hasPayments && !window.confirm("Start a new session? This clears the payment log and follow-up history. It does not update your original bill amounts. Only enter outstanding balances in the new session.")) return;
+    setPayments([]); abandonImports(); analysisRequest.current += 1; setBusy(false); setRows([]); setResult(null); setNotes([]); setError(""); };
 
   return (
     <div className="page">
       <header className="topbar">
         <div className="wrap bar">
           <div className="logo"><span className="dot" aria-hidden="true" />DueRise</div>
-          {rows.length || result ? (
+          {rows.length || result || hasPayments ? (
             <button type="button" className="btn ghost sm" onClick={reset}>Start over</button>
           ) : null}
         </div>
@@ -747,6 +764,14 @@ export default function App() {
 
         <Steps step={step} />
 
+        {hasPayments ? <section className="card payment-record" aria-label="Payments recorded this session">
+          <h2>Payments recorded, balances not recalculated</h2>
+          <p>Earlier totals, aging, customer balances and download/share are hidden because they do not include these payments. Further drafts for those bills are unavailable. This is a session log, not a reconciled ledger.</p>
+          <ul>{payments.map((p, i) => <li key={i}>{p.customer}{p.invoice_no ? " / " + p.invoice_no : ""}: {money(p.amount, p.currency)} received</li>)}</ul>
+          <p>The import and review inputs are locked to preserve this payment history. You can keep logging updates below. Recalculating is paused to avoid restoring old balances or counting payments twice. To calculate a new list, start a new session and enter only the balances still outstanding. Starting over clears this log.</p>
+        </section> : null}
+
+        {!hasPayments ? <>
         <section className="card">
           {caps.upload === false ? (
             <div className="upload-off">
@@ -825,7 +850,7 @@ export default function App() {
             ) : null}
 
             {error ? <div className="error" role="alert">{error}</div> : null}
-            <button type="button" className="btn primary big" onClick={run} disabled={busy}>
+            <button type="button" className="btn primary big" onClick={run} disabled={busy || hasPayments}>
               {busy ? "Working it out…" : "Show me who to chase"}
             </button>
           </section>
@@ -833,12 +858,14 @@ export default function App() {
           <div className="error standalone" role="alert">{error}</div>
         ) : null}
 
+        </> : null}
         {rep ? (
           <div ref={resultRef}>
             {result.warnings && result.warnings.length ? (
               <div className="notes">{result.warnings.map((w, i) => <div key={i}>{w}</div>)}</div>
             ) : null}
 
+            {!hasPayments ? <>
             <section className="stats">
               <div className="stat">
                 <div className="stat-label">You are owed</div>
@@ -896,23 +923,24 @@ export default function App() {
               ) : null}
             </section>
 
+            </> : null}
             <section className="card">
               <div className="card-head row-head">
                 <div>
                   <h2>Chase these first</h2>
-                  <p>{rep.ranking_basis || "Ranked by urgency: how much is owed and how late each bill is, under a standard aging assumption."} Open any row for a message you can send now.</p>
+                  {hasPayments ? <p>Original bill list and session follow-up history. This is not a current balance report.</p> : <p>{rep.ranking_basis || "Ranked by urgency: how much is owed and how late each bill is, under a standard aging assumption."} Open any row for a message you can send now.</p>}
                 </div>
-                <div className="head-actions">
+                {!hasPayments ? <div className="head-actions">
                   <button type="button" className="btn ghost sm" onClick={download}>Download list</button>
                   <Copy text={shareText} label="Copy share text" />
-                </div>
+                </div> : null}
               </div>
               <div className="msgs">
-                {result.messages.map((m, i) => <MessageCard key={i} m={m} currency={currency} sender={sender} company={company} />)}
+                {result.messages.map((m, i) => <MessageCard key={i} m={m} currency={currency} sender={sender} company={company} onPaymentRecorded={recordPayment} />)}
               </div>
             </section>
 
-            <section className="card">
+            {!hasPayments ? <section className="card">
               <h2>By customer</h2>
               <div className="review-scroll">
                 <table className="data">
@@ -932,7 +960,7 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-            </section>
+            </section> : null}
           </div>
         ) : null}
       </main>
