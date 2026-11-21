@@ -273,8 +273,15 @@ export function FollowUp({ m, sender, company, currency, onDecision, onPlanState
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !Object.prototype.hasOwnProperty.call(KIND_PRESENT, json.kind)) throw new Error(json.detail || "The follow-up helper is unavailable right now.");
-      setDecision(json);
-      if (onDecision) onDecision(json);
+      // Older servers can return a chase against the original bill amount
+      // after payment. Match the API fail-close in both the card and plan,
+      // dropping its draft, date suggestion and wait metadata together.
+      const hasRecordedPayment = nextEvents.some(e => e.type === "payment" && Number(e.amount) > 0);
+      const safeDecision = hasRecordedPayment && (json.kind === "draft" || json.kind === "hold")
+        ? { kind: "human", reason: "recorded payments require balance review before another message" }
+        : json;
+      setDecision(safeDecision);
+      if (onDecision) onDecision(safeDecision);
       if (onPlanState) onPlanState("ready");
     } catch (e2) {
       setErr(e2.message || "The follow-up helper is unavailable right now.");
