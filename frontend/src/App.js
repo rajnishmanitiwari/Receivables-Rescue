@@ -721,11 +721,10 @@ export default function App() {
 
   const csvOut = useMemo(() => {
     if (!rep) return "";
-    const head = "Rank,Customer,Invoice,Amount,Due date,Days late,Bucket,Chance of collection %,Cost of waiting 30d,Statutory interest,Action\n";
+    const head = "Heuristic rank,Customer,Invoice,Amount,Due date,Days late,Bucket,Draft tier\n";
     return head + rep.priority.map((p) => [
       p.rank, '"' + String(p.customer).replace(/"/g, "'") + '"', '"' + String(p.invoice_no || "").replace(/"/g, "'") + '"',
-      p.amount, p.due_date || "", p.days_overdue ?? "", '"' + p.bucket + '"', p.probability ?? "", p.slip_30d ?? "",
-      p.statutory_interest || 0, p.tier,
+      p.amount, p.due_date || "", p.days_overdue ?? "", '"' + p.bucket + '"', p.tier,
     ].join(",")).join("\n");
   }, [rep]);
 
@@ -739,9 +738,9 @@ export default function App() {
   };
 
   const shareText = rep
-    ? "I ran my unpaid bills through DueRise: " + money(rep.total_outstanding, currency)
-      + " outstanding, and " + money(rep.cost_of_waiting_30d, currency)
-      + " of it quietly disappears if I do nothing for 30 days. Free, no signup."
+    ? "My DueRise input summary: " + plural(rep.invoice_count, "bill", "bills")
+      + " entered, totalling " + money(rep.total_outstanding, currency)
+      + " outstanding. This summarises the bills I entered, not verified receipts or a current balance ledger."
     : "";
 
   // The missing-customer gate error retires as soon as every row has a name.
@@ -938,13 +937,14 @@ export default function App() {
               <div className="card-head row-head">
                 <div>
                   <h2>Chase these first</h2>
-                  {hasPayments ? <p>Original bill list and session follow-up history. This is not a current balance report.</p> : <p>{rep.ranking_basis || "Ranked by urgency: how much is owed and how late each bill is, under a standard aging assumption."} Open any row for a message you can send now.</p>}
+                  {hasPayments ? <p>Original bill list and session follow-up history. This is not a current balance report.</p> : <p>Overdue bills first, then ordered using a generic aging assumption. This is not a collection forecast. Open any row for a message you can send now.</p>}
                 </div>
                 {!hasPayments ? <div className="head-actions">
                   <button type="button" className="btn ghost sm" onClick={download}>Download list</button>
                   <Copy text={shareText} label="Copy share text" />
                 </div> : null}
               </div>
+              {!hasPayments ? <p className="hint">Downloads and share text summarise the bills you entered, not collection forecasts or legal amounts. List order uses aging assumptions.</p> : null}
               <div className="msgs">
                 {result.messages.map((m, i) => <MessageCard key={i} m={m} currency={currency} sender={sender} company={company} onPaymentRecorded={recordPayment} />)}
               </div>
