@@ -287,13 +287,15 @@ export function FollowUp({ m, sender, company, currency, onDecision, onPlanState
   // does not mean the customer wrote it today. Defaults to local today.
   const [replyDay, setReplyDay] = useState(() => localIso(new Date()));
   const log = (e) => {
-    if (e.type === "payment" && (!Number.isFinite(e.amount) || e.amount <= 0)) { setErr("Enter a valid payment amount greater than zero."); return; }
-    const day = e.type === "reply" ? replyDay : localIso(new Date());
-    if (day > localIso(new Date())) { setErr("The reply date cannot be in the future."); return; }
+    if (e.type === "payment" && (!Number.isFinite(e.amount) || e.amount <= 0)) { setErr("Enter a valid payment amount greater than zero."); return false; }
+    const day = e.type === "reply" ? confirmedDueDate(replyDay) : localIso(new Date());
+    if (!day) { setErr("Choose a valid reply received-on date. We do not assume today."); return false; }
+    if (day > localIso(new Date())) { setErr("The reply date cannot be in the future."); return false; }
     const next = [...events, { ...e, id: nextEventId.current++, day }];
     setEvents(next);
     if (e.type === "payment" && onPaymentRecorded) onPaymentRecorded(e.amount);
     decide(next);
+    return true;
   };
 
   // A suggested promise date is only ever advisory: nothing changes in the plan
@@ -358,7 +360,7 @@ export function FollowUp({ m, sender, company, currency, onDecision, onPlanState
             max={localIso(new Date())}
             onChange={(e) => setReplyDay(e.target.value)} />
           <button type="button" className="btn primary sm" disabled={busy || !replyText.trim()}
-            onClick={() => { log({ type: "reply", text: replyText }); setReplyText(""); setReplyOpen(false); }}>
+            onClick={() => { if (log({ type: "reply", text: replyText })) { setReplyText(""); setReplyOpen(false); } }}>
             Work out the next step
           </button>
         </div>
