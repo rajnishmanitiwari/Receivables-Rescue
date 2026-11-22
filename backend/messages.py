@@ -8,16 +8,21 @@ tone/language. The app never depends on that being available.
 from __future__ import annotations
 
 from typing import Any
+from decimal import Decimal, ROUND_HALF_UP, localcontext
 
 CURRENCY_SYMBOLS = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£", "AED": "AED "}
 
 
 def fmt_money(amount: float, currency: str = "INR") -> str:
     sym = CURRENCY_SYMBOLS.get(currency, currency + " ")
+    value = Decimal(str(amount))
+    with localcontext() as ctx:
+        ctx.prec = max(28, value.adjusted() + 4)
+        value = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    fraction = "" if value == value.to_integral_value() else f"{abs(value):.2f}"[-3:]
     if currency == "INR":
-        # Indian grouping: 12,34,567
-        whole = f"{int(round(amount)):d}"
-        neg = whole.startswith("-")
+        # Indian grouping, preserving paise when present.
+        whole = str(int(value))
         whole = whole.lstrip("-")
         if len(whole) > 3:
             head, tail = whole[:-3], whole[-3:]
@@ -28,8 +33,8 @@ def fmt_money(amount: float, currency: str = "INR") -> str:
             if head:
                 parts.insert(0, head)
             whole = ",".join(parts) + "," + tail
-        return ("-" if neg else "") + sym + whole
-    return f"{sym}{amount:,.0f}"
+        return ("-" if value < 0 else "") + sym + whole + fraction
+    return sym + format(value, ",.2f" if fraction else ",.0f")
 
 
 TIER_LABELS = {

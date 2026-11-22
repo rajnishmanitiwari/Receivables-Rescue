@@ -41,22 +41,13 @@ export function customerNotes(rows) {
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-function money(n, cur = "INR") {
-  const v = Math.round(Number(n) || 0);
+export function money(n, cur = "INR") {
+  const v = Number(n) || 0;
+  const options = { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 };
   if (cur === "INR") {
-    const s = String(Math.abs(v));
-    let out = s;
-    if (s.length > 3) {
-      let head = s.slice(0, -3);
-      const tail = s.slice(-3);
-      const parts = [];
-      while (head.length > 2) { parts.unshift(head.slice(-2)); head = head.slice(0, -2); }
-      if (head) parts.unshift(head);
-      out = parts.join(",") + "," + tail;
-    }
-    return (v < 0 ? "-" : "") + SYMBOLS.INR + out;
+    return (v < 0 ? "-" : "") + SYMBOLS.INR + Math.abs(v).toLocaleString("en-IN", options);
   }
-  return (SYMBOLS[cur] || cur + " ") + v.toLocaleString("en-US");
+  return (SYMBOLS[cur] || cur + " ") + v.toLocaleString("en-US", options);
 }
 
 export function rowsToCsv(rows) {
