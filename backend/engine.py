@@ -266,6 +266,20 @@ class Invoice:
 
 def _sniff_dialect(text: str) -> str:
     head = text[:4000]
+    # Recognizable headers outrank punctuation inside data fields. Raw counts
+    # alone can mistake quoted semicolons in a CSV customer for the delimiter.
+    header_scores = {}
+    for delimiter in (",", "\t", ";", "|"):
+        try:
+            first = next(csv.reader(io.StringIO(head), delimiter=delimiter), [])
+        except csv.Error:
+            continue
+        fields = _map_headers(first)
+        if "amount" in fields and len(fields) >= 2:
+            header_scores[delimiter] = len(fields)
+    if header_scores:
+        return max(header_scores, key=header_scores.get)
+    # Keep the existing fallback for input without a recognizable header.
     counts = {d: head.count(d) for d in (",", "\t", ";", "|")}
     best = max(counts, key=counts.get)
     return best if counts[best] > 0 else ","
