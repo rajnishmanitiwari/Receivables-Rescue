@@ -60,7 +60,8 @@ function money(n, cur = "INR") {
 }
 
 export function rowsToCsv(rows) {
-  const esc = (s) => '"' + String(s == null ? "" : s).replace(/"/g, "'") + '"';
+  // Analysis transport must preserve text. Download-only markers belong in chaseCsv.
+  const esc = (s) => '"' + String(s == null ? "" : s).replace(/"/g, '""') + '"';
   return "Customer,Invoice No,Amount,Due Date,Email,Phone\n" + rows
     .map((r) => [esc(r.customer), esc(r.invoice_no), Number(r.amount) || 0, esc(r.due_date), esc(r.email), esc(r.phone)].join(","))
     .join("\n");
