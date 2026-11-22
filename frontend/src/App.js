@@ -941,18 +941,18 @@ export default function App() {
             {!hasPayments ? <section className="card">
               <h2>By customer</h2>
               <div className="review-scroll">
-                <table className="data">
+                <table className="data customer-balances">
                   <thead>
                     <tr><th>Customer</th><th className="r">Owed</th><th className="r">Bills</th><th className="r">Oldest</th><th className="r">Share</th></tr>
                   </thead>
                   <tbody>
                     {rep.customers.map((c) => (
                       <tr key={c.customer}>
-                        <td>{c.customer}</td>
-                        <td className="r">{money(c.amount, currency)}</td>
-                        <td className="r">{c.count}</td>
-                        <td className="r">{c.oldest_days > 0 ? c.oldest_days + "d" : "-"}</td>
-                        <td className="r">{c.share}%</td>
+                        <td data-label="Customer">{c.customer}</td>
+                        <td className="r" data-label="Owed">{money(c.amount, currency)}</td>
+                        <td className="r" data-label="Bills">{c.count}</td>
+                        <td className="r" data-label="Oldest">{c.oldest_days > 0 ? c.oldest_days + "d" : "-"}</td>
+                        <td className="r" data-label="Share">{c.share}%</td>
                       </tr>
                     ))}
                   </tbody>

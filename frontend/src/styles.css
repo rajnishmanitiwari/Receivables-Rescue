@@ -319,3 +319,20 @@ table.data tbody tr:hover{background:var(--wash)}
 .recipient-check { min-width: 180px; max-width: 260px; white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; padding: 8px 0; }
 .recipient-check p { margin: 0 0 8px; }
 .recipient-check .btn { white-space: normal; text-align: left; }
+
+/* Bill identities must remain readable, including IDs without word spaces. */
+.msg-cust,.msg-meta,.subject,.payment-record li,.risks li{min-width:0;max-width:100%;overflow-wrap:anywhere}
+.customer-balances{table-layout:fixed}
+.customer-balances td{overflow-wrap:anywhere}
+.customer-balances th:first-child{width:40%}
+@media(max-width:620px){
+  /* This is a core balance summary, not a horizontally scrolled dataset. */
+  table.customer-balances{display:block;min-width:0}
+  .customer-balances thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .customer-balances tbody{display:block}
+  .customer-balances tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px 16px;padding:16px 0;border-bottom:1px solid var(--line)}
+  .customer-balances tr:last-child{border-bottom:0}
+  table.customer-balances td,table.customer-balances td.r{display:block;border:0;padding:0;text-align:left;min-width:0}
+  .customer-balances td:first-child{grid-column:1 / -1;font-weight:600}
+  .customer-balances td::before{content:attr(data-label);display:block;color:var(--muted);font-size:11.5px;font-weight:500;margin-bottom:4px}
+}
