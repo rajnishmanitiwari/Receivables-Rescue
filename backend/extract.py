@@ -383,7 +383,13 @@ async def extract_file(filename: str, blob: bytes) -> dict[str, Any]:
 
     if name.endswith((".csv", ".tsv", ".txt")):
         try:
-            invoices, warnings = engine.parse_invoices(blob.decode("utf-8", "ignore"))
+            text = blob.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return {"rows": [], "note": (
+                f"{filename}: text encoding could not be read. Nothing was imported from this file. "
+                "Export or save it as UTF-8 CSV or text, then try again.")}
+        try:
+            invoices, warnings = engine.parse_invoices(text)
         except engine.ParseError as exc:
             return {"rows": [], "note": f"{filename}: {exc}"}
         return {"rows": [{
