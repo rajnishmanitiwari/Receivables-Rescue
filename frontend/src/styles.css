@@ -336,3 +336,7 @@ table.data tbody tr:hover{background:var(--wash)}
   .customer-balances td:first-child{grid-column:1 / -1;font-weight:600}
   .customer-balances td::before{content:attr(data-label);display:block;color:var(--muted);font-size:11.5px;font-weight:500;margin-bottom:4px}
 }
+
+.copy-control{min-width:0;max-width:100%}
+.copy-failed{flex:1 1 100%}
+.copy-failed textarea{width:100%}

@@ -66,19 +66,39 @@ export function stripUnconfirmedDates(rows) {
 
 /* ------------------------------------------------------------------ */
 
-function Copy({ text, label = "Copy" }) {
-  const [done, setDone] = useState(false);
+export function Copy({ text, label = "Copy" }) {
+  const [status, setStatus] = useState("");
+  const attempt = useRef(0);
+  const timer = useRef(null);
+  useEffect(() => {
+    attempt.current += 1;
+    setStatus("");
+    return () => { attempt.current += 1; clearTimeout(timer.current); };
+  }, [text]);
   const onClick = async () => {
-    try { await navigator.clipboard.writeText(text); }
+    const request = ++attempt.current;
+    clearTimeout(timer.current);
+    let copied = false;
+    try { await navigator.clipboard.writeText(text); copied = true; }
     catch (e) {
+      if (request !== attempt.current) return;
       const ta = document.createElement("textarea");
+      const previous = document.activeElement;
       ta.value = text; document.body.appendChild(ta); ta.select();
-      try { document.execCommand("copy"); } catch (e2) { /* no-op */ }
-      document.body.removeChild(ta);
+      try { copied = document.execCommand("copy") === true; } catch (e2) { copied = false; }
+      finally { ta.remove(); if (previous && previous.focus) previous.focus(); }
     }
-    setDone(true); setTimeout(() => setDone(false), 1600);
+    if (request !== attempt.current) return;
+    setStatus(copied ? "copied" : "failed");
+    if (copied) timer.current = setTimeout(() => setStatus(""), 1600);
   };
-  return <button type="button" className="btn ghost sm" onClick={onClick}>{done ? "Copied" : label}</button>;
+  return <div className={"copy-control" + (status === "failed" ? " copy-failed" : "")}>
+    <button type="button" className="btn ghost sm" onClick={onClick}>{status === "copied" ? "Copied" : label}</button>
+    {status === "failed" ? <div>
+      <p role="status">Copy did not work. Select and copy the text below.</p>
+      <textarea aria-label="Text to copy manually" readOnly rows={5} value={text} onFocus={(e) => e.target.select()} />
+    </div> : null}
+  </div>;
 }
 
 function Steps({ step }) {
