@@ -127,7 +127,7 @@ function Drop({ onFiles, busy }) {
       </div>
       <div className="drop-title">{busy ? "Reading your bills…" : "Drop your unpaid bills here"}</div>
       <div className="drop-sub">
-        A PDF of an invoice, or a spreadsheet. You can add several at once.
+        A PDF of an invoice, or a spreadsheet. Add up to 12 files at once.
       </div>
     </div>
   );
@@ -625,13 +625,17 @@ export default function App() {
 
   const addFiles = useCallback(async (files) => {
     if (!files.length) return false;
+    if (files.length > 12) {
+      setError("You selected " + files.length + " files. Add up to 12 at a time. None of this selection was imported; split it into smaller batches.");
+      return false;
+    }
     const session = importSession.current;
     session.pending += 1;
     analysisRequest.current += 1;
     setBusy(false);
     setReading(true); setError(""); setResult(null);
     const fd = new FormData();
-    files.slice(0, 12).forEach((f) => fd.append("files", f));
+    files.forEach((f) => fd.append("files", f));
     try {
       const res = await fetch(API + "/api/extract", { method: "POST", body: fd });
       const json = await res.json().catch(() => ({}));
