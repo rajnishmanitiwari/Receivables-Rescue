@@ -407,7 +407,13 @@ async def extract_file(filename: str, blob: bytes) -> dict[str, Any]:
             doc = pymupdf.open(stream=blob, filetype="pdf")
         except Exception:
             return {"rows": [], "note": f"{filename} could not be opened as a PDF."}
-        pages = list(doc)[:MAX_PAGES]
+        if len(doc) > MAX_PAGES:
+            page_count = len(doc)
+            doc.close()
+            return {"rows": [], "note": (
+                f"{filename} has {page_count} pages. Keep each PDF to {MAX_PAGES} pages or fewer. "
+                "Nothing was imported from this PDF; split it into smaller documents and try again.")}
+        pages = list(doc)
         text = "\n".join(p.get_text() for p in pages)
         if len(text.strip()) >= THIN_TEXT_CHARS:
             row = parse_invoice_text(text)
