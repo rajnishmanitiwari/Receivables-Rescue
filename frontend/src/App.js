@@ -624,7 +624,7 @@ export default function App() {
   }, [result]);
 
   const addFiles = useCallback(async (files) => {
-    if (!files.length) return;
+    if (!files.length) return false;
     const session = importSession.current;
     session.pending += 1;
     analysisRequest.current += 1;
@@ -635,7 +635,7 @@ export default function App() {
     try {
       const res = await fetch(API + "/api/extract", { method: "POST", body: fd });
       const json = await res.json().catch(() => ({}));
-      if (session !== importSession.current) return;
+      if (session !== importSession.current) return false;
       if (!res.ok) throw new Error(json.detail || "Those files could not be read.");
       const got = (json.rows || []).map((r) => {
         // Source fallback also gates document rows during a rolling API update.
@@ -652,8 +652,10 @@ export default function App() {
       if (got.length && reviewRef.current) setTimeout(() => {
         if (session === importSession.current && reviewRef.current) reviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 120);
+      return got.length > 0;
     } catch (err) {
       if (session === importSession.current) setError(err.message || "Those files could not be read.");
+      return false;
     } finally {
       if (session === importSession.current) {
         session.pending -= 1;
@@ -666,9 +668,13 @@ export default function App() {
     if (!paste.trim()) return;
     const session = importSession.current;
     setReading(true); setError("");
-    const blob = new Blob([paste], { type: "text/csv" });
-    await addFiles([new File([blob], "pasted.csv", { type: "text/csv" })]);
-    if (session === importSession.current) { setPaste(""); setShowPaste(false); }
+    const submitted = paste;
+    const blob = new Blob([submitted], { type: "text/csv" });
+    const imported = await addFiles([new File([blob], "pasted.csv", { type: "text/csv" })]);
+    if (session === importSession.current && imported) {
+      // Do not discard text the user corrected while the import was running.
+      setPaste((current) => current === submitted ? "" : current);
+    }
   };
 
   const run = useCallback(async () => {
