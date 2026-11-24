@@ -165,6 +165,9 @@ def parse_amount(raw: Any) -> float | None:
     if not s:
         return None
     neg = s.startswith("(") and s.endswith(")")
+    # Preserve the mathematical minus used by spreadsheet/accounting exports.
+    # Dropping it would turn a credit into a positive receivable.
+    s = s.replace("\u2212", "-")
     s = re.sub(r"[^0-9.,\-]", "", s)
     if not s:
         return None
@@ -179,7 +182,8 @@ def parse_amount(raw: Any) -> float | None:
     except ValueError:
         return None
     if neg:
-        val = -val
+        # Accounting parentheses denote negative, never invert an explicit minus.
+        val = -abs(val)
     return val
 
 
