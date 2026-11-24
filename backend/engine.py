@@ -309,6 +309,12 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
     candidate = _map_headers(rows[0])
     first_row_has_amount = parse_amount(rows[0][-1] if rows[0] else "") is not None
     if len(candidate) >= 2 and not (first_row_has_amount and "amount" not in candidate):
+        amount_columns = sum(_norm(h) in _HEADER_ALIASES["amount"] for h in rows[0])
+        if amount_columns > 1:
+            raise ParseError(
+                "More than one amount column was found. Keep only the outstanding balance column you intend "
+                "to use and name it Amount, then try again. No rows from this input were imported or analysed."
+            )
         header_map = candidate
         body = rows[1:]
     if not body:
