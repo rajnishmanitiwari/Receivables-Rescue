@@ -294,7 +294,13 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
         raise ParseError("No invoice data provided.")
 
     delim = _sniff_dialect(text)
-    rows = [r for r in csv.reader(io.StringIO(text), delimiter=delim) if any(str(c).strip() for c in r)]
+    try:
+        rows = [r for r in csv.reader(io.StringIO(text), delimiter=delim, strict=True) if any(str(c).strip() for c in r)]
+    except csv.Error:
+        raise ParseError(
+            "CSV text could not be read safely. Check for unclosed quotes or extra text after a closing quote, "
+            "then try again. No rows from this input were imported or analysed."
+        ) from None
     if not rows:
         raise ParseError("Could not read any rows from that input.")
 
