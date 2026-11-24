@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import re
 from dataclasses import dataclass, field, asdict
 from datetime import date, datetime, timedelta
@@ -180,6 +181,8 @@ def parse_amount(raw: Any) -> float | None:
     try:
         val = float(s)
     except ValueError:
+        return None
+    if not math.isfinite(val):
         return None
     if neg:
         # Accounting parentheses denote negative, never invert an explicit minus.
