@@ -327,6 +327,13 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
     if not body:
         raise ParseError("Found a header row but no invoice rows underneath it.")
 
+    if header_map and any(any(str(c).strip() for c in row[len(rows[0]):]) for row in body):
+        raise ParseError(
+            "A row has more fields than the header. Check the separators and quote values containing "
+            "separators, such as comma-formatted amounts, then try again. "
+            "No rows from this input were imported or analysed."
+        )
+
     positional_mode = not header_map
     if positional_mode:
         # Positional fallback: customer, invoice_no, amount, due_date, email, phone
