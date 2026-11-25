@@ -165,6 +165,9 @@ def parse_amount(raw: Any) -> float | None:
     s = str(raw).strip()
     if not s:
         return None
+    # A rate is not an outstanding money amount. Never discard its unit.
+    if any(mark in s for mark in ("%", "\uff05", "\u066a")):
+        return None
     # Scientific notation is not a supported money format. Stripping its
     # exponent marker would silently turn e.g. 1e3 into 13.
     if re.search(r"[0-9][0-9.,]*[eE][+\-\u2212]?[0-9]", s):
