@@ -8,11 +8,11 @@ import server
 
 TODAY=date(2026,11,22)
 
-def table(delimiter,competitor):
+def table(delimiter,competitor,branches=30):
     out=io.StringIO()
     writer=csv.writer(out,delimiter=delimiter,quoting=csv.QUOTE_ALL)
     writer.writerow(['Customer','Invoice No','Amount','Due Date','Email','Phone'])
-    customer='Acme "North" '+competitor.join(['branch']*30)
+    customer='Acme "North" '+competitor.join(['branch']*branches)
     invoice='INV-'+competitor.join(['42']*8)
     writer.writerow([customer,invoice,5000.49,'2026-10-15','',''])
     return out.getvalue(),customer,invoice
@@ -22,11 +22,16 @@ def table(delimiter,competitor):
 def test_header_beats_delimiters_inside_quoted_identity(delimiter,competitor):
     text,customer,invoice=table(delimiter,competitor)
     assert engine._sniff_dialect(text)==delimiter
+    # The delimiter is still recognized, but long debtor names now fail
+    # closed rather than truncating potentially distinct customer identities.
+    with pytest.raises(engine.ParseError, match='longer than 120 characters'):
+        engine.parse_invoices(text,today=TODAY)
+    text,customer,invoice=table(delimiter,competitor,branches=12)
+    assert engine._sniff_dialect(text)==delimiter
     rows,warnings=engine.parse_invoices(text,today=TODAY)
     assert len(rows)==1
-    # Existing field length limits are intentionally unchanged.
-    assert rows[0].customer==customer[:120]
-    assert rows[0].invoice_no==invoice[:60]
+    assert rows[0].customer==customer
+    assert rows[0].invoice_no==invoice
     assert rows[0].amount==5000.49
     assert rows[0].due_date==date(2026,10,15)
     assert rows[0].date_source=='column'

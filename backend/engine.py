@@ -411,6 +411,11 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
             # rejected below and the user names each bill first.
             unnamed += 1
             continue
+        if len(customer) > 120:
+            raise ParseError(
+                "A customer name is longer than 120 characters. Shorten or correct it to a unique name "
+                "of at most 120 characters, then try again. No rows from this input were imported or analysed."
+            )
         invoice_no = cell(row, "invoice_no")
         if len(invoice_no) > 60:
             raise ParseError(
@@ -419,7 +424,7 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
             )
         invoices.append(
             Invoice(
-                customer=customer[:120],
+                customer=customer,
                 invoice_no=invoice_no,
                 amount=round(amount, 2),
                 due_date=due,
