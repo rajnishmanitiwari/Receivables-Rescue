@@ -354,6 +354,12 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
                 "More than one amount column was found. Keep only the outstanding balance column you intend "
                 "to use and name it Amount, then try again. No rows from this input were imported or analysed."
             )
+        due_columns = sum(_norm(h) in _HEADER_ALIASES["due_date"] for h in rows[0])
+        if due_columns > 1:
+            raise ParseError(
+                "More than one due-date column was found. Keep only the due date you intend "
+                "to use and name it Due Date, then try again. No rows from this input were imported or analysed."
+            )
         header_map = candidate
         body = rows[1:]
     if not body:
