@@ -218,10 +218,26 @@ def parse_date(raw: Any) -> date | None:
             return datetime.strptime(s, fmt).date()
         except ValueError:
             continue
-    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    # Read the whole cell, never turn a range, note or malformed timestamp
+    # into a confirmed due date by silently discarding its suffix.
+    m = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", s)
     if m:
         try:
             return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    if re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}"
+        r"(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?", s
+    ):
+        try:
+            # A due-date column uses the stated calendar day, not a timezone
+            # conversion. Validate the time too before accepting that day.
+            # Python 3.10 only accepts 3 or 6 fractional digits. Pad valid
+            # shorter fractions so supported ISO values do not become unknown.
+            stamp = re.sub(r"\.(\d{1,6})(?=Z|[+-]|$)",
+                           lambda m: "." + m.group(1).ljust(6, "0"), s)
+            return datetime.fromisoformat(stamp.replace("Z", "+00:00")).date()
         except ValueError:
             return None
     return None
