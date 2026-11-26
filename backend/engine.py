@@ -290,6 +290,8 @@ class Invoice:
     # (a numeric date readable day-first or month-first - kept as a visible
     # guess, never a confirmed due date). "" when none.
     date_source: str = ""
+    # Preserve unreadable source text for correction in the import review.
+    due_date_raw: str = ""
     # derived
     days_overdue: int = 0
     bucket: str = ""
@@ -465,6 +467,7 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
                 invoice_no=invoice_no,
                 amount=round(amount, 2),
                 due_date=due,
+                due_date_raw=raw_due if due is None else "",
                 email=cell(row, "email")[:120],
                 phone=cell(row, "phone")[:40],
                 date_source=date_source,
@@ -746,7 +749,7 @@ def analyse(invoices: list[Invoice], today: date | None = None,
         "risks": risks,
         "priority": [
             {
-                **{k: v for k, v in asdict(i).items() if k != "due_date"},
+                **{k: v for k, v in asdict(i).items() if k not in ("due_date", "due_date_raw")},
                 "due_date": i.due_date.isoformat() if i.due_date else None,
                 "probability": round(i.probability * 100) if i.probability is not None else None,
             }

@@ -7,7 +7,7 @@ import { chaseCsv } from "./chaseCsv";
 const API = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
 const SYMBOLS = { INR: "₹", USD: "$", EUR: "€", GBP: "£", AED: "AED " };
 const TIER_CLASS = { reminder: "t-ok", firm: "t-warn", escalation: "t-hot", final: "t-crit" };
-const BLANK = { customer: "", invoice_no: "", amount: "", due_date: "", email: "", phone: "", confidence: "manual", date_assumed: false, date_assumed_reason: "" };
+const BLANK = { customer: "", invoice_no: "", amount: "", due_date: "", email: "", phone: "", confidence: "manual", date_assumed: false, date_assumed_reason: "", due_date_raw: "" };
 
 // Import notes about guessed dates are derived live from the rows, not kept
 // as static strings: once a row is confirmed the note must not keep saying
@@ -186,6 +186,11 @@ export function ReviewTable({ rows, setRows, currency }) {
                 <td><input className="w-sm num" inputMode="decimal" value={r.amount} onChange={(e) => update(i, "amount", e.target.value)} placeholder="0" /></td>
                 <td>
                   <input className="w-md" type="date" value={r.due_date || ""} onChange={(e) => update(i, "due_date", e.target.value)} />
+                  {r.due_date_raw ? <div className="original-date">
+                    <strong>Original date text</strong>
+                    <div className="original-date-value">{r.due_date_raw}</div>
+                    <span>{r.due_date ? "Using the date you entered above." : "Could not read this date. Enter the due date above, or leave it blank to keep this bill unscheduled."}</span>
+                  </div> : null}
                   {r.date_assumed ? <button type="button" className="assumed" onClick={() => update(i, "date_assumed", false)}>We estimated this date. Tap to confirm, or fix it.</button> : null}
                 </td>
                 <td><input value={r.email} onChange={(e) => update(i, "email", e.target.value)} placeholder="-" /></td>

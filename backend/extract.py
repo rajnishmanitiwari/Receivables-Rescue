@@ -395,6 +395,7 @@ async def extract_file(filename: str, blob: bytes) -> dict[str, Any]:
         return {"rows": [{
             "customer": i.customer, "invoice_no": i.invoice_no, "amount": i.amount,
             "due_date": i.due_date.isoformat() if i.due_date else None,
+            "due_date_raw": i.due_date_raw,
             # Positional and ambiguous-format dates are both guesses the user
             # must confirm before they drive chasing. The reason lets the
             # review screen explain each guess accurately and drop the
