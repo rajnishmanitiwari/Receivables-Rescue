@@ -165,6 +165,9 @@ def parse_amount(raw: Any) -> float | None:
     s = str(raw).strip()
     if not s:
         return None
+    # Do not join operands into a larger amount when stripping punctuation.
+    if re.search(r"[0-9]\s*[+/*\u00d7\u00f7]\s*[+\-\u2212]?\s*[0-9]", s):
+        return None
     # An explicit CR marker is not confirmed positive money to collect.
     # Reject it rather than stripping the marker and chasing a credit.
     if re.search(r"(?<![A-Za-z])cr(?![A-Za-z])", s, re.IGNORECASE):
