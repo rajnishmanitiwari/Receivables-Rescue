@@ -165,6 +165,10 @@ def parse_amount(raw: Any) -> float | None:
     s = str(raw).strip()
     if not s:
         return None
+    # An explicit CR marker is not confirmed positive money to collect.
+    # Reject it rather than stripping the marker and chasing a credit.
+    if re.search(r"(?<![A-Za-z])cr(?![A-Za-z])", s, re.IGNORECASE):
+        return None
     # A rate is not an outstanding money amount. Never discard its unit.
     if any(mark in s for mark in ("%", "\uff05", "\u066a")):
         return None
