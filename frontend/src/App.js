@@ -677,8 +677,11 @@ export default function App() {
       // Guessed-date notes are derived from the live rows (see guessNotes);
       // keeping the static strings would leave a stale "not scheduled"
       // warning after the user confirms the date.
-      setNotes((json.notes || []).filter((n) => !GUESS_NOTE_MARKERS.some((m) => n.includes(m))));
-      if (!got.length && !(json.notes || []).length) setNotes(["Nothing readable was found in those files."]);
+      // Imports are additive, so keep warnings from each completed attempt.
+      // Equal skip-count notes can describe different files; do not deduplicate.
+      const importNotes = (json.notes || []).filter((n) => !GUESS_NOTE_MARKERS.some((m) => n.includes(m)));
+      if (!got.length && !(json.notes || []).length) importNotes.push("Nothing readable was found in those files.");
+      setNotes((prev) => [...prev, ...importNotes]);
       if (got.length && reviewRef.current) setTimeout(() => {
         if (session === importSession.current && reviewRef.current) reviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 120);
@@ -838,6 +841,7 @@ export default function App() {
               <button type="button" className="btn ghost" onClick={usePaste} disabled={reading || !paste.trim()}>Add these</button>
             </div>
           ) : null}
+          {notes.length ? <p className="hint">Import history includes earlier attempts in this session. Check the review table for the bills added.</p> : null}
           {[...notes, ...guessNotes(rows), ...customerNotes(rows)].length ? <div className="notes">{[...notes, ...guessNotes(rows), ...customerNotes(rows)].map((n, i) => <div key={i}>{n}</div>)}</div> : null}
           {!caps.vision && caps.upload !== false ? (
             <p className="cap-note">

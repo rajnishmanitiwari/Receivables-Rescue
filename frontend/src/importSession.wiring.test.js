@@ -52,3 +52,28 @@ test('response body completing after reset is also abandoned',async()=>{
  const body=deferred();const ctx=await mount([()=>ok({rows:[ROW]}),()=>({ok:true,json:()=>body.promise})]);await upload(ctx.el);await click(ctx.el,'Start over');
  await act(async()=>body.resolve({rows:[ROW]}));expect(names(ctx.el)).toEqual([]);await done(ctx);
 });
+
+test('a later successful additive upload cannot erase an earlier rejected-file warning',async()=>{
+ const warning='More than one bill-number column was found. Keep only the intended bill number column and try again.';
+ const ctx=await mount([()=>ok({rows:[],notes:[warning]}),()=>ok({rows:[ROW],notes:[]})]);
+ expect(ctx.el.textContent).toContain(warning);await upload(ctx.el);
+ expect(names(ctx.el)).toEqual(['Initial Debtor']);expect(ctx.el.textContent).toContain(warning);expect(ctx.el.textContent).toContain('Import history includes earlier attempts');await done(ctx);
+});
+
+test('concurrent completion order preserves each current import warning',async()=>{
+ const a=deferred(),b=deferred();const ctx=await mount([()=>a.promise,()=>b.promise],false);await upload(ctx.el);await upload(ctx.el);
+ await act(async()=>b.resolve(ok({rows:[],notes:['Rejected second input.']})));
+ await act(async()=>a.resolve(ok({rows:[ROW],notes:['Skipped 1 row(s) with no usable amount.']})));
+ expect(ctx.el.textContent).toContain('Rejected second input.');expect(ctx.el.textContent).toContain('Skipped 1 row(s)');await done(ctx);
+});
+
+test('identical per-import skip counts are retained rather than falsely collapsed',async()=>{
+ const note='Skipped 1 row(s) with no usable amount.';const ctx=await mount([()=>ok({rows:[ROW],notes:[note]}),()=>ok({rows:[{...ROW,invoice_no:'INV2'}],notes:[note]})]);await upload(ctx.el);
+ expect([...ctx.el.querySelectorAll('.notes div')].filter(e=>e.textContent===note)).toHaveLength(2);await done(ctx);
+});
+
+test('fallback empty-import notes survive a later success but reset clears the session notes',async()=>{
+ const ctx=await mount([()=>ok({rows:[],notes:[]}),()=>ok({rows:[ROW],notes:[]})]);await upload(ctx.el);
+ expect(ctx.el.textContent).toContain('Nothing readable was found in those files.');await click(ctx.el,'Start over');
+ expect(ctx.el.textContent).not.toContain('Nothing readable was found in those files.');await done(ctx);
+});
