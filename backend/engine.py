@@ -430,6 +430,10 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
     unnamed = 0
     for row in body[:MAX_INVOICES]:
         amount = parse_amount(cell(row, "amount"))
+        # Validate the same two-decimal balance we actually store and chase.
+        # A tiny positive source value may round to zero, which is not a bill.
+        if amount is not None:
+            amount = round(amount, 2)
         if amount is None or amount <= 0:
             skipped += 1
             continue
@@ -477,7 +481,7 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
             Invoice(
                 customer=customer,
                 invoice_no=invoice_no,
-                amount=round(amount, 2),
+                amount=amount,
                 due_date=due,
                 due_date_raw=raw_due if due is None else "",
                 email=cell(row, "email")[:120],
