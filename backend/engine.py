@@ -366,6 +366,12 @@ def parse_invoices(text: str, today: date | None = None) -> tuple[list[Invoice],
                 "More than one customer column was found. Keep only the name of who owes you "
                 "and name that column Customer, then try again. No rows from this input were imported or analysed."
             )
+        reference_columns = sum(_norm(h) in _HEADER_ALIASES["invoice_no"] for h in rows[0])
+        if reference_columns > 1:
+            raise ParseError(
+                "More than one bill-number column was found. Keep only the bill number you intend "
+                "to use and name that column Invoice No, then try again. No rows from this input were imported or analysed."
+            )
         header_map = candidate
         body = rows[1:]
     if not body:
