@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { applyPromiseDateToEvents, clearPromiseDateFromEvents, buildNextActionEvents, localIso, isOutlierDate, confirmedDueDate } from "./promiseDate";
 import { safeEmailAddress, buildMailto } from "./mailto";
 import SAMPLE_ROWS from "./sample";
@@ -154,6 +154,7 @@ function Drop({ onFiles, busy }) {
 }
 
 export function ReviewTable({ rows, setRows, currency }) {
+  const reviewId = useId();
   const update = (i, key, val) => setRows(rows.map((r, n) => (n === i ? {
     ...r, [key]: val, ...(key === "due_date" ? { date_assumed: false } : {}),
     // Correcting a provisional name must not silently reuse the old party's contacts.
@@ -175,26 +176,26 @@ export function ReviewTable({ rows, setRows, currency }) {
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className={r.confidence === "low" ? "shaky" : ""}>
-                <td><input className={String(r.customer || "").trim() ? undefined : "need"} value={r.customer} onChange={(e) => update(i, "customer", e.target.value)} placeholder="Customer name" />
+                <td><input aria-label={"Who owes you, row " + (i + 1)} className={String(r.customer || "").trim() ? undefined : "need"} value={r.customer} onChange={(e) => update(i, "customer", e.target.value)} placeholder="Customer name" />
                   {r.recipient_unconfirmed ? <div className="recipient-check">
                     <p>Check this is who owes you, not the seller or shipping party. PDF layout can mix them up.</p>
                     <p><strong>{r.customer || "No name"}</strong><br />Email: {r.email || "None"}<br />Phone: {r.phone || "None"}</p>
                     <button type="button" className="btn ghost sm" disabled={!String(r.customer || "").trim()} onClick={() => update(i, "recipient_unconfirmed", false)}>Confirm name and contacts</button>
                   </div> : null}
                 </td>
-                <td><input className="w-sm" value={r.invoice_no} onChange={(e) => update(i, "invoice_no", e.target.value)} placeholder="-" /></td>
-                <td><input className="w-sm num" inputMode="decimal" value={r.amount} onChange={(e) => update(i, "amount", e.target.value)} placeholder="0" /></td>
+                <td><input aria-label={"Bill number, row " + (i + 1)} className="w-sm" value={r.invoice_no} onChange={(e) => update(i, "invoice_no", e.target.value)} placeholder="-" /></td>
+                <td><input aria-label={"Amount, row " + (i + 1)} className="w-sm num" inputMode="decimal" value={r.amount} onChange={(e) => update(i, "amount", e.target.value)} placeholder="0" /></td>
                 <td>
-                  <input className="w-md" type="date" value={r.due_date || ""} onChange={(e) => update(i, "due_date", e.target.value)} />
-                  {r.due_date_raw ? <div className="original-date">
+                  <input aria-label={"Due date, row " + (i + 1)} aria-describedby={r.due_date_raw ? reviewId + "-original-date-" + i : undefined} className="w-md" type="date" value={r.due_date || ""} onChange={(e) => update(i, "due_date", e.target.value)} />
+                  {r.due_date_raw ? <div className="original-date" id={reviewId + "-original-date-" + i}>
                     <strong>Original date text</strong>
                     <div className="original-date-value">{r.due_date_raw}</div>
                     <span>{r.due_date ? "Using the date you entered above." : "Could not read this date. Enter the due date above, or leave it blank to keep this bill unscheduled."}</span>
                   </div> : null}
                   {r.date_assumed ? <button type="button" className="assumed" onClick={() => update(i, "date_assumed", false)}>We estimated this date. Tap to confirm, or fix it.</button> : null}
                 </td>
-                <td><input value={r.email} onChange={(e) => update(i, "email", e.target.value)} placeholder="-" /></td>
-                <td><input className="w-md" value={r.phone} onChange={(e) => update(i, "phone", e.target.value)} placeholder="-" /></td>
+                <td><input aria-label={"Email, row " + (i + 1)} value={r.email} onChange={(e) => update(i, "email", e.target.value)} placeholder="-" /></td>
+                <td><input aria-label={"Phone, row " + (i + 1)} className="w-md" value={r.phone} onChange={(e) => update(i, "phone", e.target.value)} placeholder="-" /></td>
                 <td><button type="button" className="x" onClick={() => remove(i)} aria-label={"Remove row " + (i + 1)}>&times;</button></td>
               </tr>
             ))}
