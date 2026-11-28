@@ -20,3 +20,20 @@ test.each([
 test('success imports once and clears only submitted unchanged text',async()=>{const c=await mount(()=>ok({rows:[ROW]}));try{await click(c.el,'Add these');expect(c.el.querySelector('#paste').value).toBe('');expect(c.el.querySelectorAll('.review-table tbody tr')).toHaveLength(1);}finally{await done(c);}});
 test('text edited during successful request survives',async()=>{let resolve;const pending=new Promise(r=>resolve=r);const c=await mount(()=>pending);try{await click(c.el,'Add these');await set(c.el.querySelector('#paste'),'corrected or next bill');await act(async()=>resolve(ok({rows:[ROW]})));expect(c.el.querySelector('#paste').value).toBe('corrected or next bill');expect(c.el.querySelectorAll('.review-table tbody tr')).toHaveLength(1);}finally{await done(c);}});
 test('abandoned import cannot clear or close retained paste',async()=>{let resolve;const pending=new Promise(r=>resolve=r);const c=await mount(()=>pending);try{await click(c.el,'Add these');await click(c.el,'Try it with example bills');await act(async()=>resolve(ok({rows:[ROW]})));expect(c.el.querySelector('#paste').value).toBe('original bill text');}finally{await done(c);}});
+
+test('explicit Start over clears retained pasted bill data as well as imported rows',async()=>{
+ const c=await mount(()=>ok({rows:[ROW]}));try{
+  await click(c.el,'Add these');await set(c.el.querySelector('#paste'),'next private customer, PRIVATE-2, 2000, 2026-10-15');
+  await click(c.el,'Start over');expect(c.el.querySelector('#paste').value).toBe('');
+  expect(c.el.querySelectorAll('.review-table tbody tr')).toHaveLength(0);expect(button(c.el,'Add these').disabled).toBe(true);
+ }finally{await done(c);}
+});
+
+test('a pending abandoned paste response cannot restore text cleared by Start over',async()=>{
+ let resolve;let calls=0;const pending=new Promise(r=>resolve=r);const c=await mount(()=>++calls===1?ok({rows:[ROW]}):pending);try{
+  await click(c.el,'Add these');await set(c.el.querySelector('#paste'),'private pending input');await click(c.el,'Add these');
+  await click(c.el,'Start over');expect(c.el.querySelector('#paste').value).toBe('');
+  await act(async()=>resolve(ok({rows:[ROW]})));expect(c.el.querySelector('#paste').value).toBe('');
+  expect(c.el.querySelectorAll('.review-table tbody tr')).toHaveLength(0);
+ }finally{await done(c);}
+});

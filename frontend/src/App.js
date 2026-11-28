@@ -778,7 +778,7 @@ export default function App() {
   }, [rows]);  // eslint-disable-line react-hooks/exhaustive-deps
   const reset = () => {
     if (hasPayments && !window.confirm("Start a new session? This clears the payment log and follow-up history. It does not update your original bill amounts. Only enter outstanding balances in the new session.")) return;
-    setPayments([]); abandonImports(); analysisRequest.current += 1; setBusy(false); setRows([]); setResult(null); setNotes([]); setError(""); };
+    setPayments([]); setPaste(""); abandonImports(); analysisRequest.current += 1; setBusy(false); setRows([]); setResult(null); setNotes([]); setError(""); };
 
   return (
     <div className="page">
